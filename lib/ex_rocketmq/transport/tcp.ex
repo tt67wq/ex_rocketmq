@@ -11,6 +11,34 @@ defmodule ExRocketmq.Transport.Tcp do
 
   @behaviour Transport
 
+  @tcp_opts_schema [
+    name: [
+      type: :atom,
+      default: __MODULE__,
+      doc: "The name of the transport"
+    ],
+    host: [
+      type: :string,
+      required: true,
+      doc: "The host of the nameserver"
+    ],
+    port: [
+      type: :integer,
+      required: true,
+      doc: "The port of the nameserver"
+    ],
+    timeout: [
+      type: :integer,
+      default: 5000,
+      doc: "The timeout of the transport"
+    ],
+    sockopts: [
+      type: {:list, :any},
+      default: [],
+      doc: "The socket options of the transport"
+    ]
+  ]
+
   defstruct [:name, :host, :port, :timeout, :sockopts]
 
   @type t :: %__MODULE__{
@@ -21,15 +49,13 @@ defmodule ExRocketmq.Transport.Tcp do
           sockopts: Typespecs.opts()
         }
 
+  @type tcp_opts_schema_t :: [unquote(NimbleOptions.option_typespec(@tcp_opts_schema))]
+
   @impl Transport
   def new(opts) do
     opts =
       opts
-      |> Keyword.put_new(:name, :tcp)
-      |> Keyword.put_new(:host, "")
-      |> Keyword.put_new(:port, 443)
-      |> Keyword.put_new(:timeout, 5000)
-      |> Keyword.put_new(:sockopts, [])
+      |> NimbleOptions.validate!(@tcp_opts_schema)
 
     struct(__MODULE__, opts)
   end
@@ -59,14 +85,14 @@ defmodule ExRocketmq.Transport.Tcp do
           sockopts: sockopts
         }
       ) do
-    Connection.start_link(name, {host, port, timeout, sockopts})
+    Connection.start_link(__MODULE__, {host, port, timeout, sockopts}, name: name)
   end
 
   @impl Connection
   def init({host, port, timeout, sockopts}) do
     {:connect, :init,
      %{
-       host: host,
+       host: String.to_charlist(host),
        port: port,
        timeout: timeout,
        sockopts: sockopts,
@@ -81,6 +107,8 @@ defmodule ExRocketmq.Transport.Tcp do
         %{sock: nil, host: host, port: port, timeout: timeout, sockopts: sockopts, retry: 3} =
           s
       ) do
+    Logger.info(%{"msg" => "backoff", "host" => host, "port" => port})
+
     case :gen_tcp.connect(host, port, [{:active, false} | sockopts], timeout) do
       {:ok, sock} ->
         {:ok, %{s | sock: sock, retry: 0}}
@@ -109,6 +137,8 @@ defmodule ExRocketmq.Transport.Tcp do
         } =
           s
       ) do
+    Logger.info(%{"msg" => "backoff", "host" => host, "port" => port})
+
     case :gen_tcp.connect(host, port, [{:active, false} | sockopts], timeout) do
       {:ok, sock} ->
         {:ok, %{s | sock: sock, retry: 0}}
@@ -129,6 +159,8 @@ defmodule ExRocketmq.Transport.Tcp do
         _,
         %{sock: nil, host: host, port: port, timeout: timeout, sockopts: sockopts} = s
       ) do
+    Logger.info(%{"msg" => "connect", "host" => host, "port" => port})
+
     case :gen_tcp.connect(host, port, [{:active, false} | sockopts], timeout) do
       {:ok, sock} ->
         {:ok, %{s | sock: sock}}
