@@ -1,0 +1,14 @@
+defmodule ExRocketmq.Typespecs do
+  @moduledoc """
+  all kinds of typespecs
+  """
+
+  @type opts() :: keyword()
+  @type ok_t() :: {:ok, any()}
+  @type ok_t(t) :: {:ok, t}
+  @type name() :: atom()
+  @type on_start ::
+          {:ok, pid()}
+          | :ignore
+          | {:error, {:already_started, pid()} | term()}
+end
