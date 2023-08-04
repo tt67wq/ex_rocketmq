@@ -1,13 +1,15 @@
 defmodule RemoteTest do
   use ExUnit.Case
 
-  alias ExRocketmq.{Remote, Transport}
+  alias ExRocketmq.{Remote, Transport, Message, Protocol.Request}
+  require Message
 
   setup_all do
     %{
       "host" => host,
       "port" => port,
-      "timeout" => timeout
+      "timeout" => timeout,
+      "topic" => topic
     } =
       File.read!("./tmp/test.json") |> Jason.decode!()
 
@@ -15,6 +17,17 @@ defmodule RemoteTest do
     r = ExRocketmq.Remote.new(name: :test_remote, transport: t)
 
     start_supervised!({Remote, remote: r})
-    [remote: r]
+    [remote: r, topic: topic]
+  end
+
+  test "rpc", %{remote: r, topic: topic} do
+    assert {:ok, _} =
+             Remote.rpc(
+               r,
+               Message.message(
+                 code: Request.req_get_routeinfo_by_topic(),
+                 ext_fields: %{"topic" => ""}
+               )
+             )
   end
 end

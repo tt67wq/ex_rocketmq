@@ -220,7 +220,7 @@ defmodule ExRocketmq.Transport.Tcp do
       {:error, :timeout} = error ->
         {:reply, error, s}
 
-      {:error, reason} ->
+      {:error, reason} = error ->
         Logger.error(%{
           "reason" => reason,
           "host" => s.host,
@@ -228,7 +228,7 @@ defmodule ExRocketmq.Transport.Tcp do
           "msg" => "recv error"
         })
 
-        {:disconnect, reason, reason, s}
+        {:disconnect, error, error, s}
     end
   end
 
@@ -237,7 +237,14 @@ defmodule ExRocketmq.Transport.Tcp do
       :ok ->
         {:reply, :ok, s}
 
-      {:error, _} = error ->
+      {:error, reason} = error ->
+        Logger.error(%{
+          "reason" => reason,
+          "host" => s.host,
+          "port" => s.port,
+          "msg" => "send error"
+        })
+
         {:disconnect, error, error, s}
     end
   end

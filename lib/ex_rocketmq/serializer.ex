@@ -41,7 +41,7 @@ defmodule ExRocketmq.Serializer.Json do
           name: Typespecs.name()
         }
 
-  def new(opts) do
+  def new(opts \\ []) do
     opts =
       opts
       |> Keyword.put_new(:name, :json)

@@ -2,25 +2,60 @@ defmodule ExRocketmq.Remote do
   @moduledoc """
   The remote layer of the rocketmq: how client communicates with the nameserver
   """
-  alias ExRocketmq.{Transport, Typespecs}
+  alias ExRocketmq.{Transport, Typespecs, Serializer, Message, Remote.Waiter}
+
+  import ExRocketmq.Util.Debug
+
+  require Logger
+  require Message
 
   use GenServer
-  require Logger
 
-  defstruct [:name, :transport]
+  @remote_opts_schema [
+    name: [
+      type: :atom,
+      default: __MODULE__,
+      doc: "The name of the remote"
+    ],
+    transport: [
+      type: :any,
+      required: true,
+      doc: "The transport of the remote"
+    ],
+    serializer: [
+      type: :any,
+      default: Serializer.Json.new(),
+      doc: "The serializer of the remote"
+    ]
+  ]
+
+  defstruct [:name, :transport, :serializer]
 
   @type t :: %__MODULE__{
           name: Typespecs.name(),
+          serializer: Serializer.t(),
           transport: Transport.t()
         }
 
-  @spec new(Typespecs.opts()) :: t()
+  @type remote_opts_schema_t :: [unquote(NimbleOptions.option_typespec(@remote_opts_schema))]
+
+  @spec new(remote_opts_schema_t()) :: t()
   def new(opts) do
     opts =
       opts
-      |> Keyword.put_new(:name, :remote)
+      |> NimbleOptions.validate!(@remote_opts_schema)
 
     struct(__MODULE__, opts)
+  end
+
+  @spec rpc(t(), Message.t()) :: {:ok, Message.t()} | {:error, any()}
+  def rpc(remote, msg) when is_atom(remote) do
+    GenServer.call(remote, {:rpc, msg})
+    |> debug()
+  end
+
+  def rpc(%__MODULE__{name: name}, msg) do
+    GenServer.call(name, {:rpc, msg})
   end
 
   def start_link(remote: remote) do
@@ -28,12 +63,16 @@ defmodule ExRocketmq.Remote do
   end
 
   def init(remote) do
-    {:ok, %{transport: remote.transport, rpc_store: %{}}, {:continue, :connect}}
+    {:ok,
+     %{
+       transport: remote.transport,
+       serializer: remote.serializer,
+       # opaque => from
+       waiter: Waiter.new(name: :"#{remote.name}_waiter")
+     }, {:continue, :connect}}
   end
 
   def handle_continue(:connect, %{transport: transport} = state) do
-    Logger.debug(%{"msg" => "connecting", "host" => transport.host, "port" => transport.port})
-
     Transport.start_link(transport)
     |> case do
       {:ok, _pid} ->
@@ -46,26 +85,74 @@ defmodule ExRocketmq.Remote do
     end
   end
 
-  def handle_info(:recv, %{transport: transport} = state) do
+  def handle_call(
+        {:rpc, msg},
+        from,
+        %{transport: transport, serializer: serializer, waiter: waiter} = state
+      ) do
+    {:ok, data} = Serializer.encode(serializer, msg)
+    Transport.output(transport, data)
+    Waiter.put(waiter, Message.message(msg, :opaque), from, ttl: 5000)
+    {:noreply, state}
+  end
+
+  def handle_info(
+        :recv,
+        %{transport: transport, serializer: serializer, waiter: waiter} = state
+      ) do
     Logger.debug("recv: waiting")
 
     Transport.recv(transport)
     |> case do
       {:ok, data} ->
         Logger.debug("recv: #{inspect(data)}")
+
+        Serializer.decode(serializer, data)
+        |> case do
+          {:ok, msg} ->
+            process_msg(msg, waiter)
+
+          {:error, reason} ->
+            Logger.error(%{"msg" => "decode error", "reason" => reason})
+        end
+
         Process.send_after(self(), :recv, 0)
-        {:noreply, state}
 
       {:error, :timeout} ->
         Process.send_after(self(), :recv, 1000)
-        {:noreply, state}
 
       {:error, reason} ->
         # maybe reconnecting
         Logger.warning(%{"msg" => "recv error", "reason" => inspect(reason)})
         Process.send_after(self(), :recv, 2000)
-        {:noreply, state}
     end
+
+    {:noreply, state}
+  end
+
+  defp process_msg(msg, waiter) do
+    if Message.response_type?(msg) do
+      process_response(msg, waiter)
+    else
+      process_notify(msg)
+    end
+  end
+
+  defp process_response(msg, waiter) do
+    opaque = Message.message(msg, :opaque)
+
+    Waiter.pop(waiter, opaque)
+    |> case do
+      nil ->
+        Logger.warning(%{"msg" => "no request found", "opaque" => opaque})
+
+      pid ->
+        GenServer.reply(pid, msg)
+    end
+  end
+
+  defp process_notify(_msg) do
+    # TODO
   end
 
   def terminate(reason, state) do

@@ -23,7 +23,7 @@ defmodule ExRocketmq.Transport do
   end
 
   @spec output(t(), binary()) :: :ok | error_t()
-  def output(transport, msg), do: delegate(transport, :send, [msg])
+  def output(transport, msg), do: delegate(transport, :output, [msg])
 
   @spec recv(t()) :: {:ok, binary()} | error_t()
   def recv(transport), do: delegate(transport, :recv, [])
