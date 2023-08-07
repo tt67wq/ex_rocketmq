@@ -20,7 +20,7 @@ defmodule ExRocketmq.Remote do
     transport: [
       type: :any,
       required: true,
-      doc: "The transport of the remote"
+      doc: "The transport instance of the remote, default tcp"
     ],
     serializer: [
       type: :any,

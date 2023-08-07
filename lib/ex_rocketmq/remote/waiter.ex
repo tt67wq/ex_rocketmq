@@ -47,7 +47,7 @@ defmodule ExRocketmq.Remote.Waiter do
     value
   end
 
-  @spec put(t(), key(), pid(), ttl: non_neg_integer() | :infinity) :: any()
+  @spec put(t(), key(), value(), ttl: non_neg_integer() | :infinity) :: any()
   def put(waiter, key, value, ttl: :infinity),
     do: :ets.insert(waiter.name, {key, value, :infinity})
 
