@@ -13,4 +13,5 @@ defmodule ExRocketmq.Typespecs do
           | {:error, {:already_started, pid()} | term()}
 
   @type opaque :: non_neg_integer()
+  @type req_code :: non_neg_integer()
 end

@@ -9,7 +9,8 @@ defmodule ExRocketmq.Message do
 
   Record.defrecord(:message,
     code: 0,
-    language: 127,
+    # 5 represents erlang
+    language: 5,
     version: 317,
     opaque: 0,
     flag: 0,

@@ -4,7 +4,7 @@ defmodule ExRocketmq.Remote do
   """
   alias ExRocketmq.{Transport, Typespecs, Serializer, Message, Remote.Waiter}
 
-  import ExRocketmq.Util.Debug
+  # import ExRocketmq.Util.Debug
 
   require Logger
   require Message
@@ -39,6 +39,17 @@ defmodule ExRocketmq.Remote do
 
   @type remote_opts_schema_t :: [unquote(NimbleOptions.option_typespec(@remote_opts_schema))]
 
+  @doc """
+  create a new remote instance
+
+  ## Options
+  #{NimbleOptions.docs(@remote_opts_schema)}
+
+  ## Examples
+
+      iex> t = Transport.Tcp.new(host: "example.com", port: 9876)
+      iex> ExRocketmq.Remote.new(name: :test_remote, transport: t)
+  """
   @spec new(remote_opts_schema_t()) :: t()
   def new(opts) do
     opts =
@@ -48,6 +59,13 @@ defmodule ExRocketmq.Remote do
     struct(__MODULE__, opts)
   end
 
+  @doc """
+  make a rpc call to the remote server, and return the response
+
+  ## Examples
+
+      iex> {:ok, _res} = ExRocketmq.Remote.rpc(remote, msg)
+  """
   @spec rpc(t(), Message.t()) :: {:ok, Message.t()} | {:error, any()}
   def rpc(remote, msg) when is_atom(remote) do
     GenServer.call(remote, {:rpc, msg})
@@ -55,7 +73,6 @@ defmodule ExRocketmq.Remote do
 
   def rpc(%__MODULE__{name: name}, msg) do
     GenServer.call(name, {:rpc, msg})
-    |> debug()
   end
 
   @spec start_link(remote: t()) :: Typespecs.on_start()
