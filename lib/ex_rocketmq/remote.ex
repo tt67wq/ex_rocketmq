@@ -51,24 +51,28 @@ defmodule ExRocketmq.Remote do
   @spec rpc(t(), Message.t()) :: {:ok, Message.t()} | {:error, any()}
   def rpc(remote, msg) when is_atom(remote) do
     GenServer.call(remote, {:rpc, msg})
-    |> debug()
   end
 
   def rpc(%__MODULE__{name: name}, msg) do
     GenServer.call(name, {:rpc, msg})
+    |> debug()
   end
 
+  @spec start_link(remote: t()) :: Typespecs.on_start()
   def start_link(remote: remote) do
     GenServer.start_link(__MODULE__, remote, name: remote.name)
   end
 
   def init(remote) do
+    waiter = Waiter.new(name: :"#{remote.name}_waiter")
+    {:ok, _} = Waiter.start_link(waiter: waiter)
+
     {:ok,
      %{
        transport: remote.transport,
        serializer: remote.serializer,
        # opaque => from
-       waiter: Waiter.new(name: :"#{remote.name}_waiter")
+       waiter: waiter
      }, {:continue, :connect}}
   end
 
@@ -147,7 +151,7 @@ defmodule ExRocketmq.Remote do
         Logger.warning(%{"msg" => "no request found", "opaque" => opaque})
 
       pid ->
-        GenServer.reply(pid, msg)
+        GenServer.reply(pid, {:ok, msg})
     end
   end
 

@@ -10,7 +10,7 @@ defmodule ExRocketmq.Message do
   Record.defrecord(:message,
     code: 0,
     language: 127,
-    version: 0,
+    version: 317,
     opaque: 0,
     flag: 0,
     remark: "",

@@ -161,7 +161,12 @@ defmodule ExRocketmq.Transport.Tcp do
       ) do
     Logger.info(%{"msg" => "connect", "host" => host, "port" => port})
 
-    case :gen_tcp.connect(host, port, [{:active, false} | sockopts], timeout) do
+    case :gen_tcp.connect(
+           host,
+           port,
+           [:binary, {:active, false}, {:packet, :raw} | sockopts],
+           timeout
+         ) do
       {:ok, sock} ->
         {:ok, %{s | sock: sock}}
 
@@ -215,7 +220,7 @@ defmodule ExRocketmq.Transport.Tcp do
   def handle_call({:recv, timeout}, _, %{sock: sock} = s) do
     with {:ok, <<frame_size::size(32)>>} <- :gen_tcp.recv(sock, 4, timeout),
          {:ok, data} <- :gen_tcp.recv(sock, frame_size, timeout) do
-      {:reply, data, s}
+      {:reply, {:ok, data}, s}
     else
       {:error, :timeout} = error ->
         {:reply, error, s}

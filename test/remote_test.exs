@@ -21,12 +21,13 @@ defmodule RemoteTest do
   end
 
   test "rpc", %{remote: r, topic: topic} do
-    assert {:ok, _} =
+    assert {:ok, _res} =
              Remote.rpc(
                r,
                Message.message(
                  code: Request.req_get_routeinfo_by_topic(),
-                 ext_fields: %{"topic" => ""}
+                 language: 8,
+                 ext_fields: %{"topic" => topic}
                )
              )
   end
