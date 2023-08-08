@@ -6,6 +6,7 @@ defmodule ExRocketmq.Typespecs do
   @type opts() :: keyword()
   @type ok_t() :: {:ok, any()}
   @type ok_t(t) :: {:ok, t}
+  @type error_t() :: {:error, any()}
   @type name() :: atom()
   @type on_start ::
           {:ok, pid()}

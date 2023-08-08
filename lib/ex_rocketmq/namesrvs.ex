@@ -5,7 +5,7 @@ defmodule ExRocketmq.Namesrvs do
 
   use GenServer
 
-  alias ExRocketmq.{Remote, Typespecs, Message, Protocol.Request}
+  alias ExRocketmq.{Remote, Typespecs, Message, Protocol.Request, Models}
 
   require Message
 
@@ -53,6 +53,34 @@ defmodule ExRocketmq.Namesrvs do
     GenServer.start_link(__MODULE__, namesrvs, name: namesrvs.name)
   end
 
+  @doc """
+  query the topic route info from the namesrvs
+
+  ## Examples
+
+      iex> ExRocketmq.Namesrvs.query_topic_route_info(namesrvs, "topic")
+      {:ok,
+       %ExRocketmq.Models.TopicRouteInfo{
+         broker_datas: [
+           %ExRocketmq.Models.BrokerData{
+             broker_addrs: %{"0" => "10.88.4.78:20911", "2" => "10.88.4.144:20911"},
+             broker_name: "sts-broker-d2-0",
+             cluster: "d2"
+           }
+         ],
+         queue_datas: [
+           %ExRocketmq.Models.QueueData{
+             broker_name: "sts-broker-d2-0",
+             perm: 6,
+             read_queue_nums: 2,
+             topic_syn_flag: 0,
+             write_queue_nums: 2
+           }
+         ]
+       }}
+  """
+  @spec query_topic_route_info(t(), String.t()) ::
+          Typespecs.ok_t(Models.TopicRouteInfo.t()) | Typespecs.error_t()
   def query_topic_route_info(namesrvs, topic) do
     with {:ok, msg} <-
            GenServer.call(
@@ -62,7 +90,8 @@ defmodule ExRocketmq.Namesrvs do
       msg
       |> Message.message(:body)
       |> fix_invalid_json()
-      |> namesrvs.json_module.decode()
+      |> namesrvs.json_module.decode!()
+      |> Nestru.decode_from_map(Models.TopicRouteInfo)
       |> debug()
     end
   end

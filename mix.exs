@@ -24,6 +24,7 @@ defmodule ExRocketmq.MixProject do
       {:nimble_options, "~> 0.5"},
       {:connection, "~> 1.1"},
       {:jason, "~> 1.4"},
+      {:nestru, "~> 0.3"},
       {:dialyxir, "~> 1.3", only: [:dev], runtime: false},
       {:ex_doc, "~> 0.29", only: :dev, runtime: false}
       # {:dep_from_hexpm, "~> 0.3.0"},
