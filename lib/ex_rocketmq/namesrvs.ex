@@ -91,8 +91,8 @@ defmodule ExRocketmq.Namesrvs do
       |> Message.message(:body)
       |> fix_invalid_json()
       |> namesrvs.json_module.decode!()
-      |> Nestru.decode_from_map(Models.TopicRouteInfo)
-      |> debug()
+      |> Models.TopicRouteInfo.from_map()
+      |> then(&{:ok, &1})
     end
   end
 

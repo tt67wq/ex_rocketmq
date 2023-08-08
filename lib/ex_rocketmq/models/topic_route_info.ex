@@ -28,14 +28,14 @@ defmodule ExRocketmq.Models.TopicRouteInfo do
           queue_datas: [QueueData.t()]
         }
 
-  @derive [
-    {
-      Nestru.PreDecoder,
-      translate: %{"brokerDatas" => :broker_datas, "queueDatas" => :queue_datas}
-    },
-    {Nestru.Decoder, hint: %{broker_datas: [BrokerData], queue_datas: [QueueData]}}
-  ]
   defstruct [:broker_datas, :queue_datas]
+
+  def from_map(%{"brokerDatas" => broker_datas, "queueDatas" => queue_datas}) do
+    %__MODULE__{
+      broker_datas: broker_datas |> Enum.map(&BrokerData.from_map/1),
+      queue_datas: queue_datas |> Enum.map(&QueueData.from_map/1)
+    }
+  end
 end
 
 defmodule ExRocketmq.Models.BrokerData do
@@ -54,15 +54,15 @@ defmodule ExRocketmq.Models.BrokerData do
           cluster: String.t()
         }
 
-  @derive [
-    {Nestru.PreDecoder,
-     translate: %{
-       "brokerAddrs" => :broker_addrs,
-       "brokerName" => :broker_name
-     }},
-    Nestru.Decoder
-  ]
   defstruct [:broker_addrs, :broker_name, :cluster]
+
+  def from_map(%{"brokerAddrs" => broker_addrs, "brokerName" => broker_name, "cluster" => cluster}) do
+    %__MODULE__{
+      broker_addrs: broker_addrs,
+      broker_name: broker_name,
+      cluster: cluster
+    }
+  end
 end
 
 defmodule ExRocketmq.Models.QueueData do
@@ -84,15 +84,21 @@ defmodule ExRocketmq.Models.QueueData do
           write_queue_nums: integer()
         }
 
-  @derive [
-    {Nestru.PreDecoder,
-     translate: %{
-       "brokerName" => :broker_name,
-       "readQueueNums" => :read_queue_nums,
-       "topicSynFlag" => :topic_syn_flag,
-       "writeQueueNums" => :write_queue_nums
-     }},
-    Nestru.Decoder
-  ]
   defstruct [:broker_name, :perm, :read_queue_nums, :topic_syn_flag, :write_queue_nums]
+
+  def from_map(%{
+        "brokerName" => broker_name,
+        "perm" => perm,
+        "readQueueNums" => read_queue_nums,
+        "topicSynFlag" => topic_syn_flag,
+        "writeQueueNums" => write_queue_nums
+      }) do
+    %__MODULE__{
+      broker_name: broker_name,
+      perm: perm,
+      read_queue_nums: read_queue_nums,
+      topic_syn_flag: topic_syn_flag,
+      write_queue_nums: write_queue_nums
+    }
+  end
 end

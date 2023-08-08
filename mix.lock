@@ -13,7 +13,4 @@
   "nestru": {:hex, :nestru, "0.3.3", "50793bb15031479b50d6b4b6abc3f7699a9c3822b3eaabe745d070a154e8f5d8", [:mix], [], "hexpm", "fa248b779c182896b01feb28686abc79de975018a2c30e282cd1d8c18fb715ae"},
   "nimble_options": {:hex, :nimble_options, "0.5.2", "42703307b924880f8c08d97719da7472673391905f528259915782bb346e0a1b", [:mix], [], "hexpm", "4da7f904b915fd71db549bcdc25f8d56f378ef7ae07dc1d372cbe72ba950dce0"},
   "nimble_parsec": {:hex, :nimble_parsec, "1.3.1", "2c54013ecf170e249e9291ed0a62e5832f70a476c61da16f6aac6dca0189f2af", [:mix], [], "hexpm", "2682e3c0b2eb58d90c6375fc0cc30bc7be06f365bf72608804fb9cffa5e1b167"},
-  "poison": {:hex, :poison, "5.0.0", "d2b54589ab4157bbb82ec2050757779bfed724463a544b6e20d79855a9e43b24", [:mix], [{:decimal, "~> 2.0", [hex: :decimal, repo: "hexpm", optional: true]}], "hexpm", "11dc6117c501b80c62a7594f941d043982a1bd05a1184280c0d9166eb4d8d3fc"},
-  "strukt": {:hex, :strukt, "0.3.2", "5817449d65c1a8c21766da44c45a6e16fdc7374388a0dc1c3668c68fae1c50e7", [:mix], [{:ecto, "~> 3.0", [hex: :ecto, repo: "hexpm", optional: false]}, {:jason, "> 0.0.0", [hex: :jason, repo: "hexpm", optional: true]}], "hexpm", "97a75fda2d7f75cb6d35ef90baabb14ecb221b87a1bce4fdedcb115a0276358f"},
-  "telemetry": {:hex, :telemetry, "1.2.1", "68fdfe8d8f05a8428483a97d7aab2f268aaff24b49e0f599faa091f1d4e7f61c", [:rebar3], [], "hexpm", "dad9ce9d8effc621708f99eac538ef1cbe05d6a874dd741de2e689c47feafed5"},
 }
