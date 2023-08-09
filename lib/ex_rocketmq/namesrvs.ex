@@ -5,9 +5,27 @@ defmodule ExRocketmq.Namesrvs do
 
   use GenServer
 
-  alias ExRocketmq.{Remote, Typespecs, Message, Protocol.Request, Models}
+  alias ExRocketmq.{
+    Remote,
+    Typespecs,
+    Message,
+    Protocol.Request,
+    Protocol.Response,
+    Models,
+    NamesrvsError
+  }
 
   require Message
+  require Request
+  require Response
+
+  # request constants
+  @req_get_routeinfo_by_topic Request.req_get_routeinfo_by_topic()
+  @req_get_broker_cluster_info Request.req_get_broker_cluster_info()
+
+  # response constants
+  @resp_success Response.resp_success()
+  # @resp_error Response.resp_error()
 
   # import ExRocketmq.Util.Debug
 
@@ -79,13 +97,21 @@ defmodule ExRocketmq.Namesrvs do
     with {:ok, msg} <-
            GenServer.call(
              namesrvs.name,
-             {:rpc, Request.req_get_routeinfo_by_topic(), <<>>, %{"topic" => topic}}
+             {:rpc, @req_get_routeinfo_by_topic, <<>>, %{"topic" => topic}}
            ) do
       msg
-      |> Message.message(:body)
-      |> fix_invalid_json()
-      |> Models.TopicRouteInfo.from_json()
-      |> then(&{:ok, &1})
+      |> Message.message(:code)
+      |> case do
+        @resp_success ->
+          msg
+          |> Message.message(:body)
+          |> fix_invalid_json()
+          |> Models.TopicRouteInfo.from_json()
+          |> then(&{:ok, &1})
+
+        code ->
+          {:error, NamesrvsError.new(code, Message.message(msg, :remark))}
+      end
     end
   end
 
@@ -113,13 +139,21 @@ defmodule ExRocketmq.Namesrvs do
     with {:ok, msg} <-
            GenServer.call(
              namesrvs.name,
-             {:rpc, Request.req_get_broker_cluster_info(), <<>>, %{}}
+             {:rpc, @req_get_broker_cluster_info, <<>>, %{}}
            ) do
       msg
-      |> Message.message(:body)
-      |> fix_invalid_json()
-      |> Models.BrokerClusterInfo.from_json()
-      |> then(&{:ok, &1})
+      |> Message.message(:code)
+      |> case do
+        @resp_success ->
+          msg
+          |> Message.message(:body)
+          |> fix_invalid_json()
+          |> Models.BrokerClusterInfo.from_json()
+          |> then(&{:ok, &1})
+
+        code ->
+          {:error, NamesrvsError.new(code, Message.message(msg, :remark))}
+      end
     end
   end
 
