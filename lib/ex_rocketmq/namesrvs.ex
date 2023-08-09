@@ -9,7 +9,7 @@ defmodule ExRocketmq.Namesrvs do
 
   require Message
 
-  import ExRocketmq.Util.Debug
+  # import ExRocketmq.Util.Debug
 
   @namesrvs_opts_schema [
     name: [
@@ -17,18 +17,18 @@ defmodule ExRocketmq.Namesrvs do
       default: __MODULE__,
       doc: "The name of the namesrvs"
     ],
-    remote: [
-      type: :any,
+    remotes: [
+      type: {:list, :any},
       required: true,
-      doc: "The remote instance of the namesrvs"
+      doc: "The remote instances of the namesrvs"
     ]
   ]
 
-  defstruct [:name, :remote]
+  defstruct [:name, :remotes]
 
   @type t :: %__MODULE__{
           name: Typespecs.name(),
-          remote: Remote.t()
+          remotes: [Remote.t()]
         }
 
   @type namesrvs_opts_schema_t :: [unquote(NimbleOptions.option_typespec(@namesrvs_opts_schema))]
@@ -152,15 +152,17 @@ defmodule ExRocketmq.Namesrvs do
 
   # -------- server -------
 
-  def init(namesrvs) do
-    {:ok, _} = Remote.start_link(remote: namesrvs.remote)
-    {:ok, %{namesrvs: namesrvs, opaque: 0}}
+  def init(%{remotes: remotes}) do
+    remotes
+    |> Enum.each(fn r -> {:ok, _} = Remote.start_link(remote: r) end)
+
+    {:ok, %{remotes: List.to_tuple(remotes), opaque: 0, index: 0, size: length(remotes)}}
   end
 
   def handle_call(
         {:rpc, code, body, ext_fields},
         _from,
-        %{namesrvs: namesrvs, opaque: opaque} = state
+        %{remotes: remotes, opaque: opaque, index: index, size: size} = state
       ) do
     msg =
       Message.message(
@@ -170,6 +172,11 @@ defmodule ExRocketmq.Namesrvs do
         body: body
       )
 
-    {:reply, Remote.rpc(namesrvs.remote, msg), %{state | opaque: opaque + 1}}
+    reply =
+      remotes
+      |> elem(index)
+      |> Remote.rpc(msg)
+
+    {:reply, reply, %{state | opaque: opaque + 1, index: rem(index + 1, size)}}
   end
 end

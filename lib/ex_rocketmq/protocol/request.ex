@@ -4,6 +4,7 @@ defmodule ExRocketmq.Protocol.Request do
   """
   import ExRocketmq.Util.Const
 
+  const :req_heartbeat, 34
   const :req_get_routeinfo_by_topic, 105
   const :req_get_broker_cluster_info, 106
 end

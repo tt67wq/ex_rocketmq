@@ -8,14 +8,17 @@ defmodule NamesrvsTest do
     %{
       "host" => host,
       "port" => port,
-      "timeout" => timeout,
       "topic" => topic
     } =
       File.read!("./tmp/test.json") |> Jason.decode!()
 
-    t = Transport.Tcp.new(host: host, port: port, timeout: timeout)
-    r = ExRocketmq.Remote.new(name: :test_remote, transport: t)
-    namesrvs = ExRocketmq.Namesrvs.new(remote: r)
+    r =
+      ExRocketmq.Remote.new(
+        name: :test_remote,
+        transport: Transport.Tcp.new(host: host, port: port)
+      )
+
+    namesrvs = ExRocketmq.Namesrvs.new(remotes: [r])
 
     start_supervised!({Namesrvs, namesrvs: namesrvs})
     [namesrvs: namesrvs, topic: topic]
