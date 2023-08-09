@@ -21,20 +21,14 @@ defmodule ExRocketmq.Namesrvs do
       type: :any,
       required: true,
       doc: "The remote instance of the namesrvs"
-    ],
-    json_module: [
-      type: :atom,
-      default: Jason,
-      doc: "The json module of the namesrvs"
     ]
   ]
 
-  defstruct [:name, :remote, :json_module]
+  defstruct [:name, :remote]
 
   @type t :: %__MODULE__{
           name: Typespecs.name(),
-          remote: Remote.t(),
-          json_module: atom()
+          remote: Remote.t()
         }
 
   @type namesrvs_opts_schema_t :: [unquote(NimbleOptions.option_typespec(@namesrvs_opts_schema))]
@@ -90,8 +84,41 @@ defmodule ExRocketmq.Namesrvs do
       msg
       |> Message.message(:body)
       |> fix_invalid_json()
-      |> namesrvs.json_module.decode!()
-      |> Models.TopicRouteInfo.from_map()
+      |> Models.TopicRouteInfo.from_json()
+      |> then(&{:ok, &1})
+    end
+  end
+
+  @doc """
+  get the broker cluster info from the namesrvs
+
+  ## Examples
+
+      iex> ExRocketmq.Namesrvs.get_broker_cluster_info(namesrvs)
+      {:ok,
+        %ExRocketmq.Models.BrokerClusterInfo{
+          broker_addr_table: %{
+            "sts-broker-d2-0" => %ExRocketmq.Models.BrokerData{
+              broker_addrs: %{"0" => "10.88.4.57:20911", "1" => "10.88.4.189:20911"},
+              broker_name: "sts-broker-d2-0",
+              cluster: "d2"
+            }
+          },
+          cluster_addr_table: %{"d2" => ["sts-broker-d2-0"]}
+      }}
+  """
+  @spec get_broker_cluster_info(t()) ::
+          Typespecs.ok_t(Models.BrokerClusterInfo.t()) | Typespecs.error_t()
+  def get_broker_cluster_info(namesrvs) do
+    with {:ok, msg} <-
+           GenServer.call(
+             namesrvs.name,
+             {:rpc, Request.req_get_broker_cluster_info(), <<>>, %{}}
+           ) do
+      msg
+      |> Message.message(:body)
+      |> fix_invalid_json()
+      |> Models.BrokerClusterInfo.from_json()
       |> then(&{:ok, &1})
     end
   end

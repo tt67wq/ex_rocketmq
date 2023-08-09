@@ -24,4 +24,8 @@ defmodule NamesrvsTest do
   test "query_topic_route_info", %{namesrvs: namesrvs, topic: topic} do
     assert {:ok, _res} = Namesrvs.query_topic_route_info(namesrvs, topic)
   end
+
+  test "get_broker_cluster_info", %{namesrvs: namesrvs} do
+    assert {:ok, _res} = Namesrvs.get_broker_cluster_info(namesrvs)
+  end
 end

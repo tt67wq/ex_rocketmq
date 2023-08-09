@@ -30,6 +30,13 @@ defmodule ExRocketmq.Models.TopicRouteInfo do
 
   defstruct [:broker_datas, :queue_datas]
 
+  @spec from_json(String.t()) :: t()
+  def from_json(json) do
+    json
+    |> Jason.decode!()
+    |> from_map()
+  end
+
   def from_map(%{"brokerDatas" => broker_datas, "queueDatas" => queue_datas}) do
     %__MODULE__{
       broker_datas: broker_datas |> Enum.map(&BrokerData.from_map/1),
