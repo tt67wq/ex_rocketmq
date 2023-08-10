@@ -12,11 +12,6 @@ defmodule ExRocketmq.Transport.Tcp do
   @behaviour Transport
 
   @tcp_opts_schema [
-    name: [
-      type: :atom,
-      default: __MODULE__,
-      doc: "The name of the transport"
-    ],
     host: [
       type: :string,
       required: true,
@@ -39,10 +34,10 @@ defmodule ExRocketmq.Transport.Tcp do
     ]
   ]
 
-  defstruct [:name, :host, :port, :timeout, :sockopts]
+  defstruct [:pid, :host, :port, :timeout, :sockopts]
 
   @type t :: %__MODULE__{
-          name: Typespecs.name(),
+          pid: pid(),
           host: String.t(),
           port: non_neg_integer(),
           timeout: non_neg_integer(),
@@ -62,30 +57,25 @@ defmodule ExRocketmq.Transport.Tcp do
 
   @impl Transport
   def output(transport, data) do
-    Connection.call(transport.name, {:send, data})
+    Connection.call(transport.pid, {:send, data})
   end
 
   @impl Transport
   def recv(transport) do
-    Connection.call(transport.name, {:recv, 2000})
-  end
-
-  def child_spec(opts) do
-    m = Keyword.fetch!(opts, :transport)
-    %{id: {__MODULE__, m.name}, start: {__MODULE__, :start_link, [opts]}}
+    Connection.call(transport.pid, {:recv, 2000})
   end
 
   @impl Transport
-  def start_link(
-        transport: %{
-          name: name,
+  def start(
+        %{
           host: host,
           port: port,
           timeout: timeout,
           sockopts: sockopts
-        }
+        } = transport
       ) do
-    Connection.start_link(__MODULE__, {host, port, timeout, sockopts}, name: name)
+    {:ok, pid} = Connection.start_link(__MODULE__, {host, port, timeout, sockopts})
+    {:ok, %{transport | pid: pid}}
   end
 
   @impl Connection
@@ -109,7 +99,8 @@ defmodule ExRocketmq.Transport.Tcp do
       ) do
     Logger.info(%{"msg" => "backoff", "host" => host, "port" => port})
 
-    case :gen_tcp.connect(host, port, [{:active, false} | sockopts], timeout) do
+    do_connect(host, port, sockopts, timeout)
+    |> case do
       {:ok, sock} ->
         {:ok, %{s | sock: sock, retry: 0}}
 
@@ -139,7 +130,8 @@ defmodule ExRocketmq.Transport.Tcp do
       ) do
     Logger.info(%{"msg" => "backoff", "host" => host, "port" => port})
 
-    case :gen_tcp.connect(host, port, [{:active, false} | sockopts], timeout) do
+    do_connect(host, port, sockopts, timeout)
+    |> case do
       {:ok, sock} ->
         {:ok, %{s | sock: sock, retry: 0}}
 
@@ -159,14 +151,8 @@ defmodule ExRocketmq.Transport.Tcp do
         _,
         %{sock: nil, host: host, port: port, timeout: timeout, sockopts: sockopts} = s
       ) do
-    Logger.info(%{"msg" => "connect", "host" => host, "port" => port})
-
-    case :gen_tcp.connect(
-           host,
-           port,
-           [:binary, {:active, false}, {:packet, :raw} | sockopts],
-           timeout
-         ) do
+    do_connect(host, port, sockopts, timeout)
+    |> case do
       {:ok, sock} ->
         {:ok, %{s | sock: sock}}
 
@@ -180,6 +166,17 @@ defmodule ExRocketmq.Transport.Tcp do
 
         {:backoff, 1000, s}
     end
+  end
+
+  defp do_connect(host, port, sockopts, timeout) do
+    Logger.info(%{"msg" => "connecting", "host" => host, "port" => port})
+
+    :gen_tcp.connect(
+      host,
+      port,
+      [:binary, {:active, false}, {:packet, :raw} | sockopts],
+      timeout
+    )
   end
 
   @impl Connection
@@ -237,19 +234,12 @@ defmodule ExRocketmq.Transport.Tcp do
     end
   end
 
-  def handle_call({:send, data}, _, %{sock: sock} = s) do
-    case :gen_tcp.send(sock, data) do
+  def handle_call({:send, data}, _, s) do
+    case send_with_retry(s, data, 2) do
       :ok ->
         {:reply, :ok, s}
 
-      {:error, reason} = error ->
-        Logger.error(%{
-          "reason" => reason,
-          "host" => s.host,
-          "port" => s.port,
-          "msg" => "send error"
-        })
-
+      error ->
         {:disconnect, error, error, s}
     end
   end
@@ -266,5 +256,40 @@ defmodule ExRocketmq.Transport.Tcp do
   @impl Connection
   def terminate(reason, s) do
     Logger.warning(%{"msg" => "terminate", "host" => s.host, "port" => s.port, "reason" => reason})
+  end
+
+  @spec send_with_retry(any(), binary(), non_neg_integer()) :: :ok | {:error, any()}
+  defp send_with_retry(%{sock: sock} = s, data, 0) do
+    case :gen_tcp.send(sock, data) do
+      :ok ->
+        :ok
+
+      {:error, reason} = error ->
+        Logger.error(%{
+          "reason" => reason,
+          "host" => s.host,
+          "port" => s.port,
+          "msg" => "send error"
+        })
+
+        error
+    end
+  end
+
+  defp send_with_retry(%{sock: sock} = s, data, retry) do
+    case :gen_tcp.send(sock, data) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(%{
+          "reason" => reason,
+          "host" => s.host,
+          "port" => s.port,
+          "msg" => "send error, retrying"
+        })
+
+        send_with_retry(s, data, retry - 1)
+    end
   end
 end

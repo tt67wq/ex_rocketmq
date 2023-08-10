@@ -1,8 +1,8 @@
-defmodule ExRocketmq.Serializer do
+defmodule ExRocketmq.Remote.Serializer do
   @moduledoc """
   encode/decode the message to be sent or received
   """
-  alias ExRocketmq.{Typespecs, Message}
+  alias ExRocketmq.{Typespecs, Remote.Message}
 
   @type t :: struct()
 
@@ -20,7 +20,7 @@ defmodule ExRocketmq.Serializer do
   def decode(m, bin), do: delegate(m, :decode, [bin])
 end
 
-defmodule ExRocketmq.Serializer.Json do
+defmodule ExRocketmq.Remote.Serializer.Json do
   @moduledoc """
   encode/decode the message to be sent or received
 
@@ -31,14 +31,14 @@ defmodule ExRocketmq.Serializer.Json do
   |   4bytes   |     4bytes    | (21 + r_len + e_len) bytes | remain bytes |
   ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
   """
-  alias ExRocketmq.{Message}
+  alias ExRocketmq.Remote.Message
 
   require Message
 
   defstruct [:name]
 
   @type t :: %__MODULE__{
-          name: Typespecs.name()
+          name: atom()
         }
 
   def new(opts \\ []) do
@@ -65,9 +65,15 @@ defmodule ExRocketmq.Serializer.Json do
 
     frame_size = 4 + byte_size(header) + byte_size(Message.message(msg, :body))
 
-    {:ok,
-     <<frame_size::big-integer-size(32), byte_size(header)::big-integer-size(32)>> <>
-       header <> Message.message(msg, :body)}
+    ret =
+      [
+        <<frame_size::big-integer-size(32), byte_size(header)::big-integer-size(32)>>,
+        header,
+        Message.message(msg, :body)
+      ]
+      |> IO.iodata_to_binary()
+
+    {:ok, ret}
   end
 
   @spec decode(t(), binary()) :: {:ok, Message.t()} | {:error, any()}

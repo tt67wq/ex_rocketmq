@@ -2,7 +2,7 @@ defmodule ExRocketmq.Remote do
   @moduledoc """
   The remote layer of the rocketmq: how client communicates with the nameserver
   """
-  alias ExRocketmq.{Transport, Typespecs, Serializer, Message, Remote.Waiter}
+  alias ExRocketmq.{Transport, Typespecs, Remote.Serializer, Remote.Message, Remote.Waiter}
 
   # import ExRocketmq.Util.Debug
 
@@ -13,7 +13,7 @@ defmodule ExRocketmq.Remote do
 
   @remote_opts_schema [
     name: [
-      type: :atom,
+      type: {:or, [:atom, :any]},
       default: __MODULE__,
       doc: "The name of the remote"
     ],
@@ -66,14 +66,22 @@ defmodule ExRocketmq.Remote do
 
       iex> {:ok, _res} = ExRocketmq.Remote.rpc(remote, msg)
   """
-  @spec rpc(t(), Message.t()) :: {:ok, Message.t()} | {:error, any()}
-  def rpc(remote, msg) when is_atom(remote) do
-    GenServer.call(remote, {:rpc, msg})
-  end
+  @spec rpc(t() | atom() | pid(), Message.t()) :: {:ok, Message.t()} | {:error, any()}
+  def rpc(remote, msg) when is_pid(remote), do: GenServer.call(remote, {:rpc, msg})
+  def rpc(remote, msg) when is_atom(remote), do: GenServer.call(remote, {:rpc, msg})
+  def rpc(%__MODULE__{name: name}, msg), do: GenServer.call(name, {:rpc, msg})
 
-  def rpc(%__MODULE__{name: name}, msg) do
-    GenServer.call(name, {:rpc, msg})
-  end
+  @doc """
+  send msg to the remote server, and don't wait for the response
+
+  ## Examples
+
+      iex> :ok = ExRocketmq.Remote.one_way(remote, msg)
+  """
+  @spec one_way(t() | atom() | pid(), Message.t()) :: :ok
+  def one_way(remote, msg) when is_pid(remote), do: GenServer.cast(remote, {:one_way, msg})
+  def one_way(remote, msg) when is_atom(remote), do: GenServer.cast(remote, {:one_way, msg})
+  def one_way(%__MODULE__{name: name}, msg), do: GenServer.cast(name, {:one_way, msg})
 
   @spec start_link(remote: t()) :: Typespecs.on_start()
   def start_link(remote: remote) do
@@ -93,13 +101,14 @@ defmodule ExRocketmq.Remote do
      }, {:continue, :connect}}
   end
 
+  # 启动后立即连接传输层，并且启动接收消息的定时器
   def handle_continue(:connect, %{transport: transport} = state) do
-    Transport.start_link(transport)
+    Transport.start(transport)
     |> case do
-      {:ok, _pid} ->
+      {:ok, t} ->
         Logger.debug(%{"msg" => "connected", "host" => transport.host, "port" => transport.port})
         Process.send_after(self(), :recv, 0)
-        {:noreply, state}
+        {:noreply, %{state | transport: t}}
 
       {:error, reason} ->
         {:stop, reason, state}
@@ -117,28 +126,23 @@ defmodule ExRocketmq.Remote do
     {:noreply, state}
   end
 
+  def handle_cast({:one_way, msg}, %{transport: transport, serializer: serializer} = state) do
+    {:ok, data} = Serializer.encode(serializer, msg)
+    Transport.output(transport, data)
+    {:noreply, state}
+  end
+
   def handle_info(
         :recv,
         %{transport: transport, serializer: serializer, waiter: waiter} = state
       ) do
     Logger.debug("recv: waiting")
 
-    Transport.recv(transport)
-    |> case do
-      {:ok, data} ->
-        Logger.debug("recv: #{inspect(data)}")
-
-        Serializer.decode(serializer, data)
-        |> case do
-          {:ok, msg} ->
-            process_msg(msg, waiter)
-
-          {:error, reason} ->
-            Logger.error(%{"msg" => "decode error", "reason" => reason})
-        end
-
-        Process.send_after(self(), :recv, 0)
-
+    with {:ok, data} <- Transport.recv(transport),
+         {:ok, msg} <- Serializer.decode(serializer, data) do
+      process_msg(msg, waiter)
+      Process.send_after(self(), :recv, 0)
+    else
       {:error, :timeout} ->
         Process.send_after(self(), :recv, 1000)
 

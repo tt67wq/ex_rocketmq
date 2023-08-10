@@ -8,7 +8,7 @@ defmodule ExRocketmq.Namesrvs do
   alias ExRocketmq.{
     Remote,
     Typespecs,
-    Message,
+    Remote.Message,
     Protocol.Request,
     Protocol.Response,
     Models,

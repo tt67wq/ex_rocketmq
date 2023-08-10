@@ -56,7 +56,7 @@ defmodule ExRocketmq.Models.BrokerData do
    }
   """
   @type t :: %__MODULE__{
-          broker_addrs: map(),
+          broker_addrs: %{String.t() => String.t()},
           broker_name: String.t(),
           cluster: String.t()
         }
@@ -91,6 +91,10 @@ defmodule ExRocketmq.Models.QueueData do
           write_queue_nums: integer()
         }
 
+  @perm_priority Bitwise.bsl(1, 3)
+  @perm_read Bitwise.bsl(1, 2)
+  @perm_write Bitwise.bsl(1, 1)
+
   defstruct [:broker_name, :perm, :read_queue_nums, :topic_syn_flag, :write_queue_nums]
 
   def from_map(%{
@@ -107,5 +111,56 @@ defmodule ExRocketmq.Models.QueueData do
       topic_syn_flag: topic_syn_flag,
       write_queue_nums: write_queue_nums
     }
+  end
+
+  @spec writeable?(t()) :: boolean()
+  def writeable?(queue) do
+    queue.perm
+    |> Bitwise.&&&(@perm_write)
+    |> Kernel.==(@perm_write)
+  end
+
+  @spec readable?(t()) :: boolean()
+  def readable?(queue) do
+    queue.perm
+    |> Bitwise.&&&(@perm_read)
+    |> Kernel.==(@perm_read)
+  end
+end
+
+defmodule ExRocketmq.Models.MessageQueue do
+  @moduledoc """
+  The mq info model of producer
+  """
+  alias ExRocketmq.{Typespecs, Models}
+
+  defstruct [
+    :topic,
+    :broker_name,
+    :queue_id
+  ]
+
+  @type t :: %__MODULE__{
+          topic: Typespecs.topic(),
+          broker_name: String.t(),
+          queue_id: non_neg_integer()
+        }
+
+  @spec from_queue_data(Models.QueueData.t(), Typespecs.topic()) :: [t()]
+  def from_queue_data(queue_data, topic) do
+    queue_data
+    |> Models.QueueData.writeable?()
+    |> if do
+      0..(queue_data.write_queue_nums - 1)
+      |> Enum.map(fn queue_id ->
+        %__MODULE__{
+          topic: topic,
+          broker_name: queue_data.broker_name,
+          queue_id: queue_id
+        }
+      end)
+    else
+      []
+    end
   end
 end

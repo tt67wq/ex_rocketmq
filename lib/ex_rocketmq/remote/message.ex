@@ -1,8 +1,9 @@
-defmodule ExRocketmq.Message do
+defmodule ExRocketmq.Remote.Message do
   @moduledoc """
-  The message to be sent or received
+  The message to be sent or received in transport layer
   """
 
+  alias ExRocketmq.{Typespecs, Remote.ExtFields}
   require Record
 
   @response_type 1
@@ -36,5 +37,14 @@ defmodule ExRocketmq.Message do
     message(m, :flag)
     |> Bitwise.band(@response_type)
     |> Kernel.==(@response_type)
+  end
+
+  @spec new_command_message(Typespecs.req_code(), ExtFields.t(), binary()) :: t()
+  def new_command_message(code, header, body) do
+    message(
+      code: code,
+      body: body,
+      ext_fields: ExtFields.to_map(header)
+    )
   end
 end
