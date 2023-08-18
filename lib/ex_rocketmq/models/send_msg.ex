@@ -151,6 +151,9 @@ defmodule ExRocketmq.Models.SendMsg do
            status: status,
            msg_id: "",
            queue: %ExRocketmq.Models.MessageQueue{
+             # topic and broker_name will be set later
+             topic: "",
+             broker_name: "",
              queue_id: queue_id
            },
            queue_offset: offset,

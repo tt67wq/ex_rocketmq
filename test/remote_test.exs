@@ -24,7 +24,7 @@ defmodule RemoteTest do
   end
 
   test "rpc", %{remote: r, topic: topic} do
-    assert {:ok, res} =
+    assert {:ok, _} =
              Remote.rpc(
                r,
                Message.message(
@@ -33,7 +33,5 @@ defmodule RemoteTest do
                  ext_fields: %{}
                )
              )
-
-    IO.inspect(res)
   end
 end

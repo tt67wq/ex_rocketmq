@@ -6,7 +6,6 @@ defmodule ExRocketmq.Producer do
     @moduledoc """
     The state of the producer GenServer
     """
-
     alias ExRocketmq.Models
 
     @type t :: %__MODULE__{
@@ -35,6 +34,7 @@ defmodule ExRocketmq.Producer do
     Namesrvs,
     Error,
     Models,
+    Models.Letter,
     Models.SendMsg,
     Remote,
     Transport.Tcp,
@@ -251,7 +251,7 @@ defmodule ExRocketmq.Producer do
            sys_flag: get_sysflag(msg),
            born_timestamp: System.system_time(:millisecond),
            flag: msg.flag,
-           properties: Models.Message.encode_properties(msg),
+           properties: Letter.encode_properties(msg),
            reconsume_times: 0,
            unit_mode: false,
            batch: msg.batch,
@@ -281,7 +281,7 @@ defmodule ExRocketmq.Producer do
     end
   end
 
-  @spec msgs_valid?([Models.Message.t()]) :: :ok | {:error, any()}
+  @spec msgs_valid?([Letter.t()]) :: :ok | {:error, any()}
   defp msgs_valid?(msgs) do
     msgs
     |> Enum.map(& &1.topic)
@@ -295,13 +295,13 @@ defmodule ExRocketmq.Producer do
     end
   end
 
-  @spec batch_msgs([Models.Message.t()]) :: Models.Message.t()
+  @spec batch_msgs([Letter.t()]) :: Letter.t()
   defp batch_msgs([msg]), do: msg
 
   defp batch_msgs([msg | _] = msgs) do
-    body = msgs |> Enum.map(&Models.Message.encode(&1)) |> IO.iodata_to_binary()
+    body = msgs |> Enum.map(&Letter.encode(&1)) |> IO.iodata_to_binary()
 
-    %Models.Message{
+    %Letter{
       body: body,
       flag: msg.flag,
       batch: true,
@@ -339,7 +339,7 @@ defmodule ExRocketmq.Producer do
     end
   end
 
-  @spec assign_key(Models.Message.t(), pid()) :: {Models.Message.t(), String.t()}
+  @spec assign_key(Letter.t(), pid()) :: {Letter.t(), String.t()}
   defp assign_key(%{batch: false, properties: properties} = msg, uniq_id) do
     properties
     |> case do
@@ -349,7 +349,7 @@ defmodule ExRocketmq.Producer do
       _ ->
         key = UniqId.get_uniq_id(uniq_id)
 
-        {%Models.Message{
+        {%Letter{
            msg
            | properties: Map.put(properties, @property_unique_client_msgid_key, key)
          }, key}
@@ -358,20 +358,20 @@ defmodule ExRocketmq.Producer do
 
   defp assign_key(msg, _), do: {msg, ""}
 
-  @spec compress_msg(Models.Message.t(), pid(), non_neg_integer()) :: Models.Message.t()
+  @spec compress_msg(Letter.t(), pid(), non_neg_integer()) :: Letter.t()
   defp compress_msg(%{compress: true} = msg, _, _), do: msg
   defp compress_msg(%{batch: true} = msg, _, _), do: msg
 
   defp compress_msg(%{body: body} = msg, compressor, compress_over_howmuch) do
     if byte_size(body) > compress_over_howmuch do
       compressed_body = Compressor.compress(compressor, body)
-      %Models.Message{msg | body: compressed_body, compress: true}
+      %Letter{msg | body: compressed_body, compress: true}
     else
       msg
     end
   end
 
-  @spec get_sysflag(Models.Message.t()) :: non_neg_integer()
+  @spec get_sysflag(Letter.t()) :: non_neg_integer()
   defp get_sysflag(msg) do
     0
     |> set_compress_flag(msg)

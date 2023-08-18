@@ -91,7 +91,7 @@ defmodule ExRocketmq.Models.QueueData do
           write_queue_nums: integer()
         }
 
-  @perm_priority Bitwise.bsl(1, 3)
+  # @perm_priority Bitwise.bsl(1, 3)
   @perm_read Bitwise.bsl(1, 2)
   @perm_write Bitwise.bsl(1, 1)
 

@@ -2,7 +2,14 @@ defmodule ExRocketmq.Remote do
   @moduledoc """
   The remote layer of the rocketmq: how client communicates with the nameserver
   """
-  alias ExRocketmq.{Transport, Typespecs, Remote.Serializer, Remote.Message, Remote.Waiter}
+  alias ExRocketmq.{
+    Transport,
+    Typespecs,
+    Remote.Serializer,
+    Remote.Message,
+    Remote.Waiter,
+    Util.Queue
+  }
 
   # import ExRocketmq.Util.Debug
 
@@ -83,6 +90,11 @@ defmodule ExRocketmq.Remote do
   def one_way(remote, msg) when is_atom(remote), do: GenServer.cast(remote, {:one_way, msg})
   def one_way(%__MODULE__{name: name}, msg), do: GenServer.cast(name, {:one_way, msg})
 
+  @spec pop_notify(t() | atom() | pid()) :: Message.t() | :empty
+  def pop_notify(remote) when is_pid(remote), do: GenServer.call(remote, :pop_notify)
+  def pop_notify(remote) when is_atom(remote), do: GenServer.call(remote, :pop_notify)
+  def pop_notify(%__MODULE__{name: name}), do: GenServer.call(name, :pop_notify)
+
   @spec start_link(remote: t()) :: Typespecs.on_start()
   def start_link(remote: remote) do
     GenServer.start_link(__MODULE__, remote, name: remote.name)
@@ -91,13 +103,15 @@ defmodule ExRocketmq.Remote do
   def init(remote) do
     waiter = Waiter.new(name: :"#{remote.name}_waiter")
     {:ok, _} = Waiter.start_link(waiter: waiter)
+    {:ok, notify} = Queue.start_link()
 
     {:ok,
      %{
        transport: remote.transport,
        serializer: remote.serializer,
        # opaque => from
-       waiter: waiter
+       waiter: waiter,
+       notify: notify
      }, {:continue, :connect}}
   end
 
@@ -126,6 +140,9 @@ defmodule ExRocketmq.Remote do
     {:noreply, state}
   end
 
+  def handle_call(:pop_notify, _from, %{notify: queue} = state),
+    do: {:reply, Queue.pop(queue), state}
+
   def handle_cast({:one_way, msg}, %{transport: transport, serializer: serializer} = state) do
     {:ok, data} = Serializer.encode(serializer, msg)
     Transport.output(transport, data)
@@ -134,13 +151,19 @@ defmodule ExRocketmq.Remote do
 
   def handle_info(
         :recv,
-        %{transport: transport, serializer: serializer, waiter: waiter} = state
+        %{transport: transport, serializer: serializer, waiter: waiter, notify: queue} = state
       ) do
     Logger.debug("recv: waiting")
 
     with {:ok, data} <- Transport.recv(transport),
          {:ok, msg} <- Serializer.decode(serializer, data) do
-      process_msg(msg, waiter)
+      if Message.response_type?(msg) do
+        process_response(msg, waiter)
+        queue
+      else
+        process_notify(msg, queue)
+      end
+
       Process.send_after(self(), :recv, 0)
     else
       {:error, :timeout} ->
@@ -153,14 +176,6 @@ defmodule ExRocketmq.Remote do
     end
 
     {:noreply, state}
-  end
-
-  defp process_msg(msg, waiter) do
-    if Message.response_type?(msg) do
-      process_response(msg, waiter)
-    else
-      process_notify(msg)
-    end
   end
 
   defp process_response(msg, waiter) do
@@ -176,9 +191,7 @@ defmodule ExRocketmq.Remote do
     end
   end
 
-  defp process_notify(_msg) do
-    # TODO
-  end
+  defp process_notify(msg, queue), do: Queue.push(queue, msg)
 
   def terminate(reason, state) do
     Logger.warning(%{"msg" => "terminated", "reason" => inspect(reason)})
