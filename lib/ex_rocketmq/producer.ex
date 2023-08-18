@@ -325,17 +325,19 @@ defmodule ExRocketmq.Producer do
         {:ok, pid}
 
       [] ->
-        r =
-          Remote.new(
-            name: {:via, Registery, {registry, addr}},
-            transport:
-              Tcp.new(
-                host: host,
-                port: port
-              )
-          )
+        # TODO
+        {:ok, nil}
+        # r =
+        #   Remote.new(
+        #     name: {:via, Registery, {registry, addr}},
+        #     transport:
+        #       Tcp.new(
+        #         host: host,
+        #         port: port
+        #       )
+        #   )
 
-        DynamicSupervisor.start_child(supervisor, {Remote, remote: r})
+        # DynamicSupervisor.start_child(supervisor, {Remote, remote: r})
     end
   end
 

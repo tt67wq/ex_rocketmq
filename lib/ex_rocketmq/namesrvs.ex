@@ -30,39 +30,19 @@ defmodule ExRocketmq.Namesrvs do
   # import ExRocketmq.Util.Debug
 
   @namesrvs_opts_schema [
-    name: [
-      type: :atom,
-      default: __MODULE__,
-      doc: "The name of the namesrvs"
-    ],
     remotes: [
-      type: {:list, :any},
+      type: {:list, :keyword_list},
       required: true,
-      doc: "The remote instances of the namesrvs"
+      doc: "The remote opts of the namesrvs"
     ]
   ]
 
-  defstruct [:name, :remotes]
-
-  @type t :: %__MODULE__{
-          name: Typespecs.name(),
-          remotes: [Remote.t()]
-        }
-
   @type namesrvs_opts_schema_t :: [unquote(NimbleOptions.option_typespec(@namesrvs_opts_schema))]
 
-  @spec new(namesrvs_opts_schema_t()) :: t()
-  def new(opts) do
-    opts =
-      opts
-      |> NimbleOptions.validate!(@namesrvs_opts_schema)
-
-    struct(__MODULE__, opts)
-  end
-
-  @spec start_link(namesrvs: t()) :: Typespecs.on_start()
-  def start_link(namesrvs: namesrvs) do
-    GenServer.start_link(__MODULE__, namesrvs, name: namesrvs.name)
+  @spec start_link(namesrvs_opts_schema_t()) :: Typespecs.on_start()
+  def start_link(opts) do
+    opts = opts |> NimbleOptions.validate!(@namesrvs_opts_schema)
+    GenServer.start_link(__MODULE__, opts)
   end
 
   @doc """
@@ -91,12 +71,12 @@ defmodule ExRocketmq.Namesrvs do
          ]
        }}
   """
-  @spec query_topic_route_info(t(), String.t()) ::
+  @spec query_topic_route_info(pid(), String.t()) ::
           Typespecs.ok_t(Models.TopicRouteInfo.t()) | Typespecs.error_t()
   def query_topic_route_info(namesrvs, topic) do
     with {:ok, msg} <-
            GenServer.call(
-             namesrvs.name,
+             namesrvs,
              {:rpc, @req_get_routeinfo_by_topic, <<>>, %{"topic" => topic}}
            ) do
       msg
@@ -133,12 +113,12 @@ defmodule ExRocketmq.Namesrvs do
           cluster_addr_table: %{"d2" => ["sts-broker-d2-0"]}
       }}
   """
-  @spec get_broker_cluster_info(t()) ::
+  @spec get_broker_cluster_info(pid()) ::
           Typespecs.ok_t(Models.BrokerClusterInfo.t()) | Typespecs.error_t()
   def get_broker_cluster_info(namesrvs) do
     with {:ok, msg} <-
            GenServer.call(
-             namesrvs.name,
+             namesrvs,
              {:rpc, @req_get_broker_cluster_info, <<>>, %{}}
            ) do
       msg
@@ -186,11 +166,16 @@ defmodule ExRocketmq.Namesrvs do
 
   # -------- server -------
 
-  def init(%{remotes: remotes}) do
-    remotes
-    |> Enum.each(fn r -> {:ok, _} = Remote.start_link(remote: r) end)
+  def init(remotes: remotes) do
+    remote_pids =
+      remotes
+      |> Enum.map(fn r ->
+        {:ok, pid} = Remote.start_link(r)
+        pid
+      end)
+      |> List.to_tuple()
 
-    {:ok, %{remotes: List.to_tuple(remotes), opaque: 0, index: 0, size: length(remotes)}}
+    {:ok, %{remotes: remote_pids, opaque: 0, index: 0, size: length(remotes)}}
   end
 
   def handle_call(

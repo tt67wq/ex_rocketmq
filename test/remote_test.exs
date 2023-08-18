@@ -16,10 +16,11 @@ defmodule RemoteTest do
     } =
       File.read!("./tmp/test.json") |> Jason.decode!()
 
-    t = Transport.Tcp.new(host: host, port: port, timeout: timeout)
-    r = ExRocketmq.Remote.new(name: :demo, transport: t)
+    r =
+      start_supervised!(
+        {Remote, transport: Transport.Tcp.new(host: host, port: port, timeout: timeout)}
+      )
 
-    start_supervised!({Remote, remote: r})
     [remote: r, topic: topic]
   end
 

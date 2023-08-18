@@ -1,8 +1,7 @@
 defmodule NamesrvsTest do
   use ExUnit.Case
 
-  alias ExRocketmq.{Namesrvs, Transport, Message}
-  require Message
+  alias ExRocketmq.{Namesrvs, Transport}
 
   setup_all do
     %{
@@ -12,15 +11,13 @@ defmodule NamesrvsTest do
     } =
       File.read!("./tmp/test.json") |> Jason.decode!()
 
-    r =
-      ExRocketmq.Remote.new(
-        name: :test_remote,
-        transport: Transport.Tcp.new(host: host, port: port)
-      )
+    namesrvs_opts = [
+      remotes: [
+        [transport: Transport.Tcp.new(host: host, port: port)]
+      ]
+    ]
 
-    namesrvs = ExRocketmq.Namesrvs.new(remotes: [r])
-
-    start_supervised!({Namesrvs, namesrvs: namesrvs})
+    namesrvs = start_supervised!({Namesrvs, namesrvs_opts})
     [namesrvs: namesrvs, topic: topic]
   end
 
