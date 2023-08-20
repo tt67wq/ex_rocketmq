@@ -143,13 +143,14 @@ defmodule ExRocketmq.Models.SendMsg do
            status <- Map.get(@send_result_map, code, @send_unknown_error),
            ext_fields <- Message.message(msg, :ext_fields),
            region_id <- Map.get(ext_fields, "MSG_REGION", "DefaultRegion"),
-           trace <- Map.get(ext_fields, "TRACE_ON"),
+           trace <- Map.get(ext_fields, "TRACE_ON", ""),
+           msg_id <- Map.get(ext_fields, "msgId", ""),
            queue_id <- Map.get(ext_fields, "queueId", "0") |> String.to_integer(),
            offset <- Map.get(ext_fields, "queueOffset") |> String.to_integer() do
         {:ok,
          %__MODULE__{
            status: status,
-           msg_id: "",
+           msg_id: msg_id,
            queue: %ExRocketmq.Models.MessageQueue{
              # topic and broker_name will be set later
              topic: "",

@@ -26,6 +26,7 @@ defmodule NamesrvsTest do
   end
 
   test "get_broker_cluster_info", %{namesrvs: namesrvs} do
-    assert {:ok, _res} = Namesrvs.get_broker_cluster_info(namesrvs)
+    assert {:ok, res} = Namesrvs.get_broker_cluster_info(namesrvs)
+    IO.inspect(res)
   end
 end

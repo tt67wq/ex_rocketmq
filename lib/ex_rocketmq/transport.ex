@@ -18,9 +18,7 @@ defmodule ExRocketmq.Transport do
     do: apply(module, func, [m | args])
 
   @spec start(t()) :: {:ok, t()} | error_t()
-  def start(%module{} = m) do
-    apply(module, :start, [m])
-  end
+  def start(%module{} = m), do: apply(module, :start, [m])
 
   @doc """
   output a pkt by transport layer
