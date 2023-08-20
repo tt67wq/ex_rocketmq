@@ -39,20 +39,23 @@ defmodule ExRocketmq.Util.UniqId do
     )
   end
 
-  def start_link() do
+  def start_link(opts \\ []) do
     with pid <- get_pid(),
          {ip1, ip2, ip3, ip4} <- ExRocketmq.Util.Network.get_local_ipv4_address(),
          buf <- <<ip1, ip2, ip3, ip4, pid::big-integer-size(16), 0::size(32)>>,
          {begin, next} <- get_time_range(),
          do:
-           Agent.start_link(fn ->
-             %State{
-               counter: 0,
-               begin_ts: begin,
-               next_ts: next,
-               prefix: Base.encode16(buf, case: :upper)
-             }
-           end)
+           Agent.start_link(
+             fn ->
+               %State{
+                 counter: 0,
+                 begin_ts: begin,
+                 next_ts: next,
+                 prefix: Base.encode16(buf, case: :upper)
+               }
+             end,
+             opts
+           )
   end
 
   @spec get_pid() :: non_neg_integer()

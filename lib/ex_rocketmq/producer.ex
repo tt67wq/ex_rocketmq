@@ -37,7 +37,6 @@ defmodule ExRocketmq.Producer do
     Models.Letter,
     Models.SendMsg,
     Remote,
-    Transport.Tcp,
     Util.UniqId,
     Util.Compressor,
     Util.Bool,

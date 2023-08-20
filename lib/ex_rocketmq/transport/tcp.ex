@@ -31,17 +31,23 @@ defmodule ExRocketmq.Transport.Tcp do
       type: {:list, :any},
       default: [],
       doc: "The socket options of the transport"
+    ],
+    opts: [
+      type: :keyword_list,
+      default: [],
+      doc: "The other options of the transport"
     ]
   ]
 
-  defstruct [:pid, :host, :port, :timeout, :sockopts]
+  defstruct [:pid, :host, :port, :timeout, :sockopts, :opts]
 
   @type t :: %__MODULE__{
           pid: pid(),
           host: String.t(),
           port: non_neg_integer(),
           timeout: non_neg_integer(),
-          sockopts: Typespecs.opts()
+          sockopts: Typespecs.opts(),
+          opts: Typespecs.opts()
         }
 
   @type tcp_opts_schema_t :: [unquote(NimbleOptions.option_typespec(@tcp_opts_schema))]
@@ -71,10 +77,11 @@ defmodule ExRocketmq.Transport.Tcp do
           host: host,
           port: port,
           timeout: timeout,
-          sockopts: sockopts
+          sockopts: sockopts,
+          opts: opts
         } = transport
       ) do
-    {:ok, pid} = Connection.start_link(__MODULE__, {host, port, timeout, sockopts})
+    {:ok, pid} = Connection.start_link(__MODULE__, {host, port, timeout, sockopts}, opts)
     {:ok, %{transport | pid: pid}}
   end
 

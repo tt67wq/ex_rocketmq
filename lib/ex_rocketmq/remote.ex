@@ -28,6 +28,11 @@ defmodule ExRocketmq.Remote do
       type: :any,
       default: Serializer.Json.new(),
       doc: "The serializer of the remote"
+    ],
+    opts: [
+      type: :keyword_list,
+      default: [],
+      doc: "The other options of the remote"
     ]
   ]
 
@@ -58,8 +63,12 @@ defmodule ExRocketmq.Remote do
 
   @spec start_link(remote_opts_schema_t()) :: Typespecs.on_start()
   def start_link(opts) do
-    opts = opts |> NimbleOptions.validate!(@remote_opts_schema)
-    GenServer.start_link(__MODULE__, opts)
+    {opts, args} =
+      opts
+      |> NimbleOptions.validate!(@remote_opts_schema)
+      |> Keyword.pop(:opts)
+
+    GenServer.start_link(__MODULE__, args, opts)
   end
 
   def init(opts) do

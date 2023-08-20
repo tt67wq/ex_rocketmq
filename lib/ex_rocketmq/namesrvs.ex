@@ -34,6 +34,11 @@ defmodule ExRocketmq.Namesrvs do
       type: {:list, :keyword_list},
       required: true,
       doc: "The remote opts of the namesrvs"
+    ],
+    opts: [
+      type: :keyword_list,
+      default: [],
+      doc: "The other opts of the namesrvs"
     ]
   ]
 
@@ -41,8 +46,12 @@ defmodule ExRocketmq.Namesrvs do
 
   @spec start_link(namesrvs_opts_schema_t()) :: Typespecs.on_start()
   def start_link(opts) do
-    opts = opts |> NimbleOptions.validate!(@namesrvs_opts_schema)
-    GenServer.start_link(__MODULE__, opts)
+    {opts, init} =
+      opts
+      |> NimbleOptions.validate!(@namesrvs_opts_schema)
+      |> Keyword.pop(:opts)
+
+    GenServer.start_link(__MODULE__, init, opts)
   end
 
   @doc """

@@ -7,7 +7,7 @@ defmodule ExRocketmq.Typespecs do
   @type ok_t() :: {:ok, any()}
   @type ok_t(t) :: {:ok, t}
   @type error_t() :: {:error, any()}
-  @type name() :: atom()
+  @type name() :: atom() | {:global, term()} | {:via, module(), term()}
   @type str_dict() :: %{String.t() => String.t()}
   @type on_start ::
           {:ok, pid()}
