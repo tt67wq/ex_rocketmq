@@ -2,32 +2,32 @@ defmodule ExRocketmq.Producer do
   @moduledoc """
   Rocketmq Producer
   """
-  defmodule State do
-    @moduledoc """
-    The state of the producer GenServer
-    """
-    alias ExRocketmq.Models
+  # defmodule State do
+  #   @moduledoc """
+  #   The state of the producer GenServer
+  #   """
+  #   alias ExRocketmq.Models
 
-    @type t :: %__MODULE__{
-            producer: ExRocketmq.Producer.t(),
-            broker_datas: [Models.BrokerData.t()],
-            queues: [Models.MessageQueue.t()],
-            registry: atom(),
-            dynamic_supervisor: pid(),
-            uniq_id: pid(),
-            compressor: pid()
-          }
+  #   @type t :: %__MODULE__{
+  #           producer: ExRocketmq.Producer.t(),
+  #           broker_datas: [Models.BrokerData.t()],
+  #           queues: [Models.MessageQueue.t()],
+  #           registry: atom(),
+  #           dynamic_supervisor: pid(),
+  #           uniq_id: pid(),
+  #           compressor: pid()
+  #         }
 
-    defstruct [
-      :producer,
-      :broker_datas,
-      :queues,
-      :registry,
-      :dynamic_supervisor,
-      :uniq_id,
-      :compressor
-    ]
-  end
+  #   defstruct [
+  #     :producer,
+  #     :broker_datas,
+  #     :queues,
+  #     :registry,
+  #     :dynamic_supervisor,
+  #     :uniq_id,
+  #     :compressor
+  #   ]
+  # end
 
   # alias ExRocketmq.{
   #   Typespecs,

@@ -1,4 +1,4 @@
-defmodule ExRocketmq.Remote.Message do
+defmodule ExRocketmq.Remote.Packet do
   @moduledoc """
   The message to be sent or received in transport layer
   """
@@ -7,7 +7,7 @@ defmodule ExRocketmq.Remote.Message do
 
   @response_type 1
 
-  Record.defrecord(:message,
+  Record.defrecord(:packet,
     code: 0,
     # 5 represents erlang
     language: 5,
@@ -20,7 +20,7 @@ defmodule ExRocketmq.Remote.Message do
   )
 
   @type t ::
-          record(:message,
+          record(:packet,
             code: non_neg_integer(),
             language: non_neg_integer(),
             version: non_neg_integer(),
@@ -33,7 +33,7 @@ defmodule ExRocketmq.Remote.Message do
 
   @spec response_type?(t()) :: boolean()
   def response_type?(m) do
-    message(m, :flag)
+    packet(m, :flag)
     |> Bitwise.band(@response_type)
     |> Kernel.==(@response_type)
   end

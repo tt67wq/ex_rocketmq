@@ -5,6 +5,7 @@ defmodule ExRocketmq.Models.Letter do
   alias ExRocketmq.{Typespecs}
 
   defstruct [
+    :topic,
     :body,
     :flag,
     :transaction_id,
@@ -14,6 +15,7 @@ defmodule ExRocketmq.Models.Letter do
   ]
 
   @type t :: %__MODULE__{
+          topic: String.t(),
           body: binary(),
           flag: Typespecs.flag(),
           transaction_id: Typespecs.transaction_id(),

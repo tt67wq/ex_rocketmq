@@ -1,8 +1,8 @@
 defmodule RemoteTest do
   use ExUnit.Case
 
-  alias ExRocketmq.{Remote, Transport, Remote.Message, Protocol.Request}
-  require Message
+  alias ExRocketmq.{Remote, Transport, Remote.Packet, Protocol.Request}
+  require Packet
   require Request
 
   @req_get_broker_cluster_info Request.req_get_broker_cluster_info()
@@ -28,7 +28,7 @@ defmodule RemoteTest do
     assert {:ok, _} =
              Remote.rpc(
                r,
-               Message.message(
+               Packet.packet(
                  code: @req_get_broker_cluster_info,
                  language: 8,
                  ext_fields: %{}

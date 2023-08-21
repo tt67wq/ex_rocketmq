@@ -24,7 +24,7 @@ defmodule ExRocketmq.Broker do
   alias ExRocketmq.{
     Typespecs,
     Remote,
-    Remote.Message,
+    Remote.Packet,
     Remote.Error,
     Remote.ExtFields,
     Models.Heartbeat,
@@ -33,7 +33,7 @@ defmodule ExRocketmq.Broker do
     Protocol.Response
   }
 
-  require Message
+  require Packet
   require Request
   require Response
   require Logger
@@ -79,14 +79,14 @@ defmodule ExRocketmq.Broker do
     with {:ok, body} <- Heartbeat.encode(heartbeat),
          {:ok, resp_msg} <- GenServer.call(broker, {:rpc, @req_hearbeat, body, %{}}) do
       resp_msg
-      |> Message.message(:code)
+      |> Packet.packet(:code)
       |> case do
         @resp_success ->
-          GenServer.cast(broker, {:set_version, resp_msg |> Message.message(:version)})
+          GenServer.cast(broker, {:set_version, resp_msg |> Packet.packet(:version)})
           :ok
 
         code ->
-          remark = resp_msg |> Message.message(:remark)
+          remark = resp_msg |> Packet.packet(:remark)
           {:error, Error.new(code, remark)}
       end
     end
@@ -103,8 +103,7 @@ defmodule ExRocketmq.Broker do
     end
   end
 
-  @spec async_send_message(pid(), SendMsg.Request.t(), binary()) ::
-          Typespecs.task_t()
+  @spec async_send_message(pid(), SendMsg.Request.t(), binary()) :: Task.t()
   def async_send_message(broker, header, body) do
     Task.async(fn ->
       sync_send_message(broker, header, body)
@@ -130,8 +129,8 @@ defmodule ExRocketmq.Broker do
         _from,
         %{remote: remote, opaque: opaque} = state
       ) do
-    msg =
-      Message.message(
+    pkt =
+      Packet.packet(
         code: code,
         opaque: opaque,
         ext_fields: ext_fields,
@@ -140,7 +139,7 @@ defmodule ExRocketmq.Broker do
 
     reply =
       remote
-      |> Remote.rpc(msg)
+      |> Remote.rpc(pkt)
 
     {:reply, reply, %{state | opaque: opaque + 1}}
   end
@@ -158,15 +157,15 @@ defmodule ExRocketmq.Broker do
   end
 
   def handle_cast({:one_way, code, body, ext_fields}, %{remote: remote} = state) do
-    msg =
-      Message.message(
+    pkt =
+      Packet.packet(
         code: code,
         ext_fields: ext_fields,
         body: body
       )
 
     remote
-    |> Remote.one_way(msg)
+    |> Remote.one_way(pkt)
 
     {:noreply, state}
   end

@@ -2,7 +2,6 @@ defmodule ExRocketmq.Models.SendMsg do
   @moduledoc """
   request/response header model for send message
   """
-  alias ExRocketmq.Remote.Message
 
   defmodule Request do
     @moduledoc false
@@ -99,11 +98,11 @@ defmodule ExRocketmq.Models.SendMsg do
   defmodule Response do
     @moduledoc false
 
-    alias ExRocketmq.{Remote.Message, Protocol}
+    alias ExRocketmq.{Remote.Packet, Protocol}
 
     require Protocol.Response
     require Protocol.SendStatus
-    require Message
+    require Packet
 
     @type t :: %__MODULE__{
             status: non_neg_integer(),
@@ -137,11 +136,11 @@ defmodule ExRocketmq.Models.SendMsg do
     }
     @send_unknown_error Protocol.SendStatus.send_unknown_error()
 
-    @spec from_msg(Message.t()) :: {:ok, t()}
+    @spec from_msg(Packet.t()) :: {:ok, t()}
     def from_msg(msg) do
-      with code <- Message.message(msg, :code),
+      with code <- Packet.packet(msg, :code),
            status <- Map.get(@send_result_map, code, @send_unknown_error),
-           ext_fields <- Message.message(msg, :ext_fields),
+           ext_fields <- Packet.packet(msg, :ext_fields),
            region_id <- Map.get(ext_fields, "MSG_REGION", "DefaultRegion"),
            trace <- Map.get(ext_fields, "TRACE_ON", ""),
            msg_id <- Map.get(ext_fields, "msgId", ""),

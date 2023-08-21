@@ -8,14 +8,14 @@ defmodule ExRocketmq.Namesrvs do
   alias ExRocketmq.{
     Remote,
     Typespecs,
-    Remote.Message,
+    Remote.Packet,
     Remote.Error,
     Protocol.Request,
     Protocol.Response,
     Models
   }
 
-  require Message
+  require Packet
   require Request
   require Response
 
@@ -89,17 +89,17 @@ defmodule ExRocketmq.Namesrvs do
              {:rpc, @req_get_routeinfo_by_topic, <<>>, %{"topic" => topic}}
            ) do
       msg
-      |> Message.message(:code)
+      |> Packet.packet(:code)
       |> case do
         @resp_success ->
           msg
-          |> Message.message(:body)
+          |> Packet.packet(:body)
           |> fix_invalid_json()
           |> Models.TopicRouteInfo.from_json()
           |> then(&{:ok, &1})
 
         code ->
-          {:error, Error.new(code, Message.message(msg, :remark))}
+          {:error, Error.new(code, Packet.packet(msg, :remark))}
       end
     end
   end
@@ -131,17 +131,17 @@ defmodule ExRocketmq.Namesrvs do
              {:rpc, @req_get_broker_cluster_info, <<>>, %{}}
            ) do
       msg
-      |> Message.message(:code)
+      |> Packet.packet(:code)
       |> case do
         @resp_success ->
           msg
-          |> Message.message(:body)
+          |> Packet.packet(:body)
           |> fix_invalid_json()
           |> Models.BrokerClusterInfo.from_json()
           |> then(&{:ok, &1})
 
         code ->
-          {:error, Error.new(code, Message.message(msg, :remark))}
+          {:error, Error.new(code, Packet.packet(msg, :remark))}
       end
     end
   end
@@ -192,8 +192,8 @@ defmodule ExRocketmq.Namesrvs do
         _from,
         %{remotes: remotes, opaque: opaque, index: index, size: size} = state
       ) do
-    msg =
-      Message.message(
+    pkt =
+      Packet.packet(
         code: code,
         opaque: opaque,
         ext_fields: ext_fields,
@@ -203,7 +203,7 @@ defmodule ExRocketmq.Namesrvs do
     reply =
       remotes
       |> elem(index)
-      |> Remote.rpc(msg)
+      |> Remote.rpc(pkt)
 
     {:reply, reply, %{state | opaque: opaque + 1, index: rem(index + 1, size)}}
   end

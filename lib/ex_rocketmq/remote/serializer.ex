@@ -1,28 +1,28 @@
 defmodule ExRocketmq.Remote.Serializer do
   @moduledoc """
-  encode/decode the message to be sent or received
+  encode/decode the packet to be sent or received
   """
-  alias ExRocketmq.{Typespecs, Remote.Message}
+  alias ExRocketmq.{Typespecs, Remote.Packet}
 
   @type t :: struct()
 
   @callback new(Typespecs.opts()) :: t()
-  @callback encode(t(), Message.t()) :: {:ok, binary()}
-  @callback decode(t(), binary()) :: {:ok, Message.t()} | {:error, any()}
+  @callback encode(t(), Packet.t()) :: {:ok, binary()}
+  @callback decode(t(), binary()) :: {:ok, Packet.t()} | {:error, any()}
 
   defp delegate(%module{} = m, func, args),
     do: apply(module, func, [m | args])
 
-  @spec encode(t(), Message.t()) :: {:ok, binary()}
+  @spec encode(t(), Packet.t()) :: {:ok, binary()}
   def encode(m, msg), do: delegate(m, :encode, [msg])
 
-  @spec decode(t(), binary()) :: {:ok, Message.t()} | {:error, any()}
+  @spec decode(t(), binary()) :: {:ok, Packet.t()} | {:error, any()}
   def decode(m, bin), do: delegate(m, :decode, [bin])
 end
 
 defmodule ExRocketmq.Remote.Serializer.Json do
   @moduledoc """
-  encode/decode the message to be sent or received
+  encode/decode the packet to be sent or received
 
   Frame format:
   ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -31,9 +31,9 @@ defmodule ExRocketmq.Remote.Serializer.Json do
   |   4bytes   |     4bytes    | (21 + r_len + e_len) bytes | remain bytes |
   ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
   """
-  alias ExRocketmq.Remote.Message
+  alias ExRocketmq.Remote.Packet
 
-  require Message
+  require Packet
 
   defstruct [:name]
 
@@ -49,34 +49,34 @@ defmodule ExRocketmq.Remote.Serializer.Json do
     struct(__MODULE__, opts)
   end
 
-  @spec encode(t(), Message.t()) :: {:ok, binary()}
-  def encode(_, msg) do
+  @spec encode(t(), Packet.t()) :: {:ok, binary()}
+  def encode(_, pkt) do
     {:ok, header} =
       %{
-        "code" => Message.message(msg, :code),
-        "language" => Message.message(msg, :language),
-        "version" => Message.message(msg, :version),
-        "opaque" => Message.message(msg, :opaque),
-        "flag" => Message.message(msg, :flag),
-        "remark" => Message.message(msg, :remark),
-        "extFields" => Message.message(msg, :ext_fields)
+        "code" => Packet.packet(pkt, :code),
+        "language" => Packet.packet(pkt, :language),
+        "version" => Packet.packet(pkt, :version),
+        "opaque" => Packet.packet(pkt, :opaque),
+        "flag" => Packet.packet(pkt, :flag),
+        "remark" => Packet.packet(pkt, :remark),
+        "extFields" => Packet.packet(pkt, :ext_fields)
       }
       |> Jason.encode()
 
-    frame_size = 4 + byte_size(header) + byte_size(Message.message(msg, :body))
+    frame_size = 4 + byte_size(header) + byte_size(Packet.packet(pkt, :body))
 
     ret =
       [
         <<frame_size::big-integer-size(32), byte_size(header)::big-integer-size(32)>>,
         header,
-        Message.message(msg, :body)
+        Packet.packet(pkt, :body)
       ]
       |> IO.iodata_to_binary()
 
     {:ok, ret}
   end
 
-  @spec decode(t(), binary()) :: {:ok, Message.t()} | {:error, any()}
+  @spec decode(t(), binary()) :: {:ok, Packet.t()} | {:error, any()}
   def decode(_, bin) do
     <<header_size::big-integer-size(32), rest::binary>> = bin
     <<header_body::bytes-size(header_size), body::binary>> = rest
@@ -84,7 +84,7 @@ defmodule ExRocketmq.Remote.Serializer.Json do
     case Jason.decode(header_body) do
       {:ok, map} ->
         {:ok,
-         Message.message(
+         Packet.packet(
            code: map["code"],
            language: map["language"],
            version: map["version"],

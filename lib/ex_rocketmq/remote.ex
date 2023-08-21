@@ -7,14 +7,14 @@ defmodule ExRocketmq.Remote do
     Transport,
     Typespecs,
     Remote.Serializer,
-    Remote.Message,
+    Remote.Packet,
     Remote.Waiter,
     Util.Queue,
     Util.Random
   }
 
   require Logger
-  require Message
+  require Packet
 
   use GenServer
 
@@ -45,8 +45,8 @@ defmodule ExRocketmq.Remote do
 
       iex> {:ok, _res} = ExRocketmq.Remote.rpc(remote, msg)
   """
-  @spec rpc(pid(), Message.t()) :: {:ok, Message.t()} | {:error, any()}
-  def rpc(remote, msg), do: GenServer.call(remote, {:rpc, msg})
+  @spec rpc(pid(), Packet.t()) :: {:ok, Packet.t()} | {:error, any()}
+  def rpc(remote, pkt), do: GenServer.call(remote, {:rpc, pkt})
 
   @doc """
   send msg to the remote server, and don't wait for the response
@@ -55,10 +55,10 @@ defmodule ExRocketmq.Remote do
 
       iex> :ok = ExRocketmq.Remote.one_way(remote, msg)
   """
-  @spec one_way(pid(), Message.t()) :: :ok
-  def one_way(remote, msg), do: GenServer.cast(remote, {:one_way, msg})
+  @spec one_way(pid(), Packet.t()) :: :ok
+  def one_way(remote, pkt), do: GenServer.cast(remote, {:one_way, pkt})
 
-  @spec pop_notify(pid()) :: Message.t() | :empty
+  @spec pop_notify(pid()) :: Packet.t() | :empty
   def pop_notify(remote), do: GenServer.call(remote, :pop_notify)
 
   @spec start_link(remote_opts_schema_t()) :: Typespecs.on_start()
@@ -106,7 +106,7 @@ defmodule ExRocketmq.Remote do
       ) do
     {:ok, data} = Serializer.encode(serializer, msg)
     Transport.output(transport, data)
-    Waiter.put(waiter, Message.message(msg, :opaque), from, ttl: 5000)
+    Waiter.put(waiter, Packet.packet(msg, :opaque), from, ttl: 5000)
     {:noreply, state}
   end
 
@@ -126,11 +126,11 @@ defmodule ExRocketmq.Remote do
     Logger.debug("recv: waiting")
 
     with {:ok, data} <- Transport.recv(transport),
-         {:ok, msg} <- Serializer.decode(serializer, data) do
-      if Message.response_type?(msg) do
-        process_response(msg, waiter)
+         {:ok, pkt} <- Serializer.decode(serializer, data) do
+      if Packet.response_type?(pkt) do
+        process_response(pkt, waiter)
       else
-        process_notify(msg, queue)
+        process_notify(pkt, queue)
       end
 
       Process.send_after(self(), :recv, 0)
@@ -148,8 +148,8 @@ defmodule ExRocketmq.Remote do
     {:noreply, state}
   end
 
-  defp process_response(msg, waiter) do
-    opaque = Message.message(msg, :opaque)
+  defp process_response(pkt, waiter) do
+    opaque = Packet.packet(pkt, :opaque)
 
     Waiter.pop(waiter, opaque)
     |> case do
@@ -158,11 +158,11 @@ defmodule ExRocketmq.Remote do
         :ok
 
       pid ->
-        GenServer.reply(pid, {:ok, msg})
+        GenServer.reply(pid, {:ok, pkt})
     end
   end
 
-  defp process_notify(msg, queue), do: Queue.push(queue, msg)
+  defp process_notify(pkt, queue), do: Queue.push(queue, pkt)
 
   def terminate(reason, state) do
     Logger.warning(%{"msg" => "terminated", "reason" => inspect(reason)})
