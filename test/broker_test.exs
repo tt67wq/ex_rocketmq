@@ -36,9 +36,9 @@ defmodule BrokerTest do
              |> Debug.debug()
   end
 
-  test "send_message", %{broker: broker, topic: topic} do
+  test "sync_send_message", %{broker: broker, topic: topic} do
     msg = %Models.Letter{
-      body: "Hello Elixir",
+      body: "Sync: Hello Elixir",
       flag: 0,
       transaction_id: "",
       batch: false,
@@ -47,7 +47,7 @@ defmodule BrokerTest do
     }
 
     assert {:ok, _resp} =
-             Broker.send_message(
+             Broker.sync_send_message(
                broker,
                %Models.SendMsg.Request{
                  producer_group: "test",
@@ -67,5 +67,37 @@ defmodule BrokerTest do
                msg.body
              )
              |> Debug.debug()
+  end
+
+  test "one_way_send_message", %{broker: broker, topic: topic} do
+    msg = %Models.Letter{
+      body: "One Way: Hello Elixir",
+      flag: 0,
+      transaction_id: "",
+      batch: false,
+      compress: false,
+      properties: %{}
+    }
+
+    assert :ok ==
+             Broker.one_way_send_message(
+               broker,
+               %Models.SendMsg.Request{
+                 producer_group: "test",
+                 topic: topic,
+                 queue_id: 1,
+                 sys_flag: 0,
+                 born_timestamp: :os.system_time(:millisecond),
+                 flag: msg.flag,
+                 properties: Models.Letter.encode_properties(msg),
+                 reconsume_times: 0,
+                 unit_mode: false,
+                 max_reconsume_times: 0,
+                 batch: msg.batch,
+                 default_topic: "TBW102",
+                 default_topic_queue_num: 4
+               },
+               msg.body
+             )
   end
 end

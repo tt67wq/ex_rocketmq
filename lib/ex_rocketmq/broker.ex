@@ -92,14 +92,30 @@ defmodule ExRocketmq.Broker do
     end
   end
 
-  @spec send_message(pid(), SendMsg.Request.t(), binary()) ::
+  @spec sync_send_message(pid(), SendMsg.Request.t(), binary()) ::
           {:ok, SendMsg.Response.t()} | Typespecs.error_t()
-  def send_message(broker, header, body) do
+  def sync_send_message(broker, header, body) do
     with ext_fields <- ExtFields.to_map(header),
          {:ok, remote_msg} <- GenServer.call(broker, {:rpc, @req_send_message, body, ext_fields}),
          {:ok, resp} <- SendMsg.Response.from_msg(remote_msg) do
       q = %{resp.queue | topic: header.topic, broker_name: GenServer.call(broker, :broker_name)}
       {:ok, %{resp | queue: q}}
+    end
+  end
+
+  @spec async_send_message(pid(), SendMsg.Request.t(), binary()) ::
+          Typespecs.task_t()
+  def async_send_message(broker, header, body) do
+    Task.async(fn ->
+      sync_send_message(broker, header, body)
+    end)
+  end
+
+  @spec one_way_send_message(pid(), SendMsg.Request.t(), binary()) ::
+          :ok
+  def one_way_send_message(broker, header, body) do
+    with ext_fields <- ExtFields.to_map(header) do
+      GenServer.cast(broker, {:one_way, @req_send_message, body, ext_fields})
     end
   end
 
@@ -139,5 +155,19 @@ defmodule ExRocketmq.Broker do
     else
       {:noreply, state}
     end
+  end
+
+  def handle_cast({:one_way, code, body, ext_fields}, %{remote: remote} = state) do
+    msg =
+      Message.message(
+        code: code,
+        ext_fields: ext_fields,
+        body: body
+      )
+
+    remote
+    |> Remote.one_way(msg)
+
+    {:noreply, state}
   end
 end

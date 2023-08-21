@@ -129,7 +129,6 @@ defmodule ExRocketmq.Remote do
          {:ok, msg} <- Serializer.decode(serializer, data) do
       if Message.response_type?(msg) do
         process_response(msg, waiter)
-        queue
       else
         process_notify(msg, queue)
       end
@@ -155,7 +154,8 @@ defmodule ExRocketmq.Remote do
     Waiter.pop(waiter, opaque)
     |> case do
       nil ->
-        Logger.warning(%{"msg" => "no request found", "opaque" => opaque})
+        # maybe one-way request
+        :ok
 
       pid ->
         GenServer.reply(pid, {:ok, msg})
