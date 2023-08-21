@@ -134,34 +134,32 @@ defmodule ExRocketmq.Models.SendMsg do
         Protocol.SendStatus.send_slave_not_available(),
       Protocol.Response.resp_success() => Protocol.SendStatus.send_ok()
     }
-    @send_unknown_error Protocol.SendStatus.send_unknown_error()
 
-    @spec from_msg(Packet.t()) :: {:ok, t()}
-    def from_msg(msg) do
-      with code <- Packet.packet(msg, :code),
-           status <- Map.get(@send_result_map, code, @send_unknown_error),
-           ext_fields <- Packet.packet(msg, :ext_fields),
+    @spec from_pkt(Packet.t()) :: t()
+    def from_pkt(pkt) do
+      with code <- Packet.packet(pkt, :code),
+           status <- Map.fetch!(@send_result_map, code),
+           ext_fields <- Packet.packet(pkt, :ext_fields),
            region_id <- Map.get(ext_fields, "MSG_REGION", "DefaultRegion"),
            trace <- Map.get(ext_fields, "TRACE_ON", ""),
            msg_id <- Map.get(ext_fields, "msgId", ""),
            queue_id <- Map.get(ext_fields, "queueId", "0") |> String.to_integer(),
            offset <- Map.get(ext_fields, "queueOffset") |> String.to_integer() do
-        {:ok,
-         %__MODULE__{
-           status: status,
-           msg_id: msg_id,
-           queue: %ExRocketmq.Models.MessageQueue{
-             # topic and broker_name will be set later
-             topic: "",
-             broker_name: "",
-             queue_id: queue_id
-           },
-           queue_offset: offset,
-           transaction_id: Map.get(ext_fields, "transactionId", ""),
-           offset_msg_id: Map.get(ext_fields, "msgId", ""),
-           region_id: region_id,
-           trace_on: trace not in ["false", ""]
-         }}
+        %__MODULE__{
+          status: status,
+          msg_id: msg_id,
+          queue: %ExRocketmq.Models.MessageQueue{
+            # topic and broker_name will be set later
+            topic: "",
+            broker_name: "",
+            queue_id: queue_id
+          },
+          queue_offset: offset,
+          transaction_id: Map.get(ext_fields, "transactionId", ""),
+          offset_msg_id: Map.get(ext_fields, "msgId", ""),
+          region_id: region_id,
+          trace_on: trace not in ["false", ""]
+        }
       end
     end
   end

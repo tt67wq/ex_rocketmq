@@ -25,4 +25,5 @@ defmodule ExRocketmq.Typespecs do
   @type compress_level :: :zlib.zlevel()
   @type transaction_id :: String.t()
   @type properties :: str_dict()
+  @type ext_fields :: str_dict()
 end

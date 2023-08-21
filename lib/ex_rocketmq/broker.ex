@@ -96,8 +96,8 @@ defmodule ExRocketmq.Broker do
           {:ok, SendMsg.Response.t()} | Typespecs.error_t()
   def sync_send_message(broker, header, body) do
     with ext_fields <- ExtFields.to_map(header),
-         {:ok, remote_msg} <- GenServer.call(broker, {:rpc, @req_send_message, body, ext_fields}),
-         {:ok, resp} <- SendMsg.Response.from_msg(remote_msg) do
+         {:ok, pkt} <- GenServer.call(broker, {:rpc, @req_send_message, body, ext_fields}),
+         resp <- SendMsg.Response.from_pkt(pkt) do
       q = %{resp.queue | topic: header.topic, broker_name: GenServer.call(broker, :broker_name)}
       {:ok, %{resp | queue: q}}
     end

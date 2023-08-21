@@ -3,6 +3,8 @@ defmodule ExRocketmq.Remote.Packet do
   The message to be sent or received in transport layer
   """
 
+  alias ExRocketmq.Typespecs
+
   require Record
 
   @response_type 1
@@ -27,7 +29,7 @@ defmodule ExRocketmq.Remote.Packet do
             opaque: non_neg_integer(),
             flag: non_neg_integer(),
             remark: String.t(),
-            ext_fields: map(),
+            ext_fields: Typespecs.ext_fields(),
             body: binary()
           )
 

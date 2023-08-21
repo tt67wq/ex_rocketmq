@@ -11,4 +11,7 @@ defmodule ExRocketmq.Protocol.Response do
   const :res_slave_not_available, 11
   const :res_flush_slave_timeout, 12
   const :resp_topic_not_exist, 17
+  const :resp_pull_not_found, 19
+  const :resp_pull_retry_immediately, 20
+  const :resp_pull_offset_moved, 21
 end
