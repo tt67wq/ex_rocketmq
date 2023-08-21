@@ -10,12 +10,12 @@ defmodule ExRocketmq.Producer.Selector do
   @callback new(Typespecs.opts()) :: t()
   @callback start_link(selector: t()) :: Typespecs.on_start()
 
-  @callback select(t(), Models.Letter.t(), [Models.MessageQueue.t()]) :: Models.MessageQueue.t()
+  @callback select(t(), Models.Message.t(), [Models.MessageQueue.t()]) :: Models.MessageQueue.t()
 
   defp delegate(%module{} = m, func, args),
     do: apply(module, func, [m | args])
 
-  @spec select(t(), Models.Letter.t(), [Models.MessageQueue.t()]) :: Models.MessageQueue.t()
+  @spec select(t(), Models.Message.t(), [Models.MessageQueue.t()]) :: Models.MessageQueue.t()
   def select(m, msg, queues), do: delegate(m, :select, [msg, queues])
 
   @spec start_link(t()) :: Typespecs.on_start()

@@ -37,7 +37,7 @@ defmodule BrokerTest do
   end
 
   test "sync_send_message", %{broker: broker, topic: topic} do
-    msg = %Models.Letter{
+    msg = %Models.Message{
       body: "Sync: Hello Elixir",
       flag: 0,
       transaction_id: "",
@@ -56,7 +56,7 @@ defmodule BrokerTest do
                  sys_flag: 0,
                  born_timestamp: :os.system_time(:millisecond),
                  flag: msg.flag,
-                 properties: Models.Letter.encode_properties(msg),
+                 properties: Models.Message.encode_properties(msg),
                  reconsume_times: 0,
                  unit_mode: false,
                  max_reconsume_times: 0,
@@ -70,7 +70,7 @@ defmodule BrokerTest do
   end
 
   test "one_way_send_message", %{broker: broker, topic: topic} do
-    msg = %Models.Letter{
+    msg = %Models.Message{
       body: "One Way: Hello Elixir",
       flag: 0,
       transaction_id: "",
@@ -89,7 +89,7 @@ defmodule BrokerTest do
                  sys_flag: 0,
                  born_timestamp: :os.system_time(:millisecond),
                  flag: msg.flag,
-                 properties: Models.Letter.encode_properties(msg),
+                 properties: Models.Message.encode_properties(msg),
                  reconsume_times: 0,
                  unit_mode: false,
                  max_reconsume_times: 0,

@@ -1,6 +1,6 @@
-defmodule ExRocketmq.Models.Letter do
+defmodule ExRocketmq.Models.Message do
   @moduledoc """
-  The model of letter sent by producer or consumed by consumer
+  The model of message sent by producer or consumed by consumer
   """
   alias ExRocketmq.{Typespecs}
 
