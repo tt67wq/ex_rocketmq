@@ -26,13 +26,18 @@ defmodule ExRocketmq.Broker do
     Remote,
     Remote.Packet,
     Remote.ExtFields,
-    Models.Heartbeat,
-    Models.SendMsg,
-    Models.PullMsg,
-    Models.QueryConsumerOffset,
-    Models.SearchOffset,
     Protocol.Request,
     Protocol.Response
+  }
+
+  alias ExRocketmq.Models.{
+    Heartbeat,
+    SendMsg,
+    PullMsg,
+    QueryConsumerOffset,
+    UpdateConsumerOffset,
+    SearchOffset,
+    GetMaxOffset
   }
 
   require Packet
@@ -44,7 +49,9 @@ defmodule ExRocketmq.Broker do
 
   @req_send_message Request.req_send_message()
   @req_query_consumer_offset Request.req_query_consumer_offset()
+  @req_update_consumer_offset Request.req_update_consumer_offset()
   @req_search_offset_by_timestamp Request.req_search_offset_by_timestamp()
+  @req_get_max_offset Request.req_get_max_offset()
   @req_pull_message Request.req_pull_message()
   @req_hearbeat Request.req_heartbeat()
   @resp_success Response.resp_success()
@@ -145,12 +152,31 @@ defmodule ExRocketmq.Broker do
     end
   end
 
+  @spec update_consumer_offset(pid(), UpdateConsumerOffset.t()) ::
+          :ok | Typespecs.error_t()
+  def update_consumer_offset(broker, req) do
+    with ext_fields <- ExtFields.to_map(req) do
+      GenServer.cast(broker, {:one_way, @req_update_consumer_offset, <<>>, ext_fields})
+    end
+  end
+
   @spec search_offset_by_timestamp(pid(), SearchOffset.t()) ::
           {:ok, non_neg_integer()} | Typespecs.error_t()
   def search_offset_by_timestamp(broker, req) do
     with ext_fields <- ExtFields.to_map(req),
          {:ok, pkt} <-
            GenServer.call(broker, {:rpc, @req_search_offset_by_timestamp, <<>>, ext_fields}),
+         ext_fields <- Packet.packet(pkt, :ext_fields) do
+      {:ok, Map.get(ext_fields, "offset", "0") |> String.to_integer()}
+    end
+  end
+
+  @spec get_max_offset(pid(), GetMaxOffset.t()) ::
+          {:ok, non_neg_integer()} | Typespecs.error_t()
+  def get_max_offset(broker, req) do
+    with ext_fields <- ExtFields.to_map(req),
+         {:ok, pkt} <-
+           GenServer.call(broker, {:rpc, @req_get_max_offset, <<>>, ext_fields}),
          ext_fields <- Packet.packet(pkt, :ext_fields) do
       {:ok, Map.get(ext_fields, "offset", "0") |> String.to_integer()}
     end

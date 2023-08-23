@@ -55,7 +55,6 @@ defmodule BrokerTest do
                    }
                  ])
              })
-             |> Debug.debug()
   end
 
   test "sync_send_message", %{broker: broker, topic: topic} do
@@ -88,7 +87,6 @@ defmodule BrokerTest do
                },
                msg.body
              )
-             |> Debug.debug()
   end
 
   test "one_way_send_message", %{broker: broker, topic: topic} do
@@ -151,7 +149,6 @@ defmodule BrokerTest do
                  expression_type: "TAG"
                }
              )
-             |> Debug.debug()
   end
 
   test "search_offset_by_timestamp", %{broker: broker, topic: topic} do
@@ -164,6 +161,38 @@ defmodule BrokerTest do
                  timestamp: :os.system_time(:millisecond)
                }
              )
-             |> Debug.debug()
+  end
+
+  test "get_max_offset", %{broker: broker, topic: topic} do
+    assert {:ok, _} =
+             Broker.get_max_offset(
+               broker,
+               %Models.GetMaxOffset{
+                 topic: topic,
+                 queue_id: 1
+               }
+             )
+  end
+
+  test "update_consumer_offset", %{broker: broker, topic: topic, group: group} do
+    assert {:ok, offset} =
+             Broker.get_max_offset(
+               broker,
+               %Models.GetMaxOffset{
+                 topic: topic,
+                 queue_id: 1
+               }
+             )
+
+    assert :ok ==
+             Broker.update_consumer_offset(
+               broker,
+               %Models.UpdateConsumerOffset{
+                 consumer_group: group,
+                 topic: topic,
+                 queue_id: 1,
+                 commit_offset: offset - 5
+               }
+             )
   end
 end
