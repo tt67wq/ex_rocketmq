@@ -147,10 +147,10 @@ defmodule ExRocketmq.Models.MessageExt do
            born_timestamp::big-integer-size(64),
            rest::binary
          >> <- body,
-         {born_host, _port, rest} <- parse_host_and_port(sys_flag, rest),
+         {_, born_host, _port, rest} <- parse_host_and_port(sys_flag, rest),
          <<store_timestamp::big-integer-size(64), rest::binary>> <- rest,
-         {store_host, port, rest} <- parse_host_and_port(sys_flag, rest),
-         offset_message_id <- get_offset_message_id(store_host, port, queue_offset),
+         {host_bin, store_host, port, rest} <- parse_host_and_port(sys_flag, rest),
+         offset_message_id <- get_offset_message_id(host_bin, port, commit_log_offset),
          <<reconsume_times::big-integer-size(32),
            prepared_transaction_offset::big-integer-size(64), body_length::big-integer-size(32),
            rest::binary>> <- rest,
@@ -190,16 +190,16 @@ defmodule ExRocketmq.Models.MessageExt do
   end
 
   @spec parse_host_and_port(non_neg_integer(), binary()) ::
-          {String.t(), non_neg_integer(), binary()}
+          {binary(), String.t(), non_neg_integer(), binary()}
   defp parse_host_and_port(sys_flag, binary) do
     sys_flag
     |> ipv6?()
     |> if do
       <<host::bytes-size(16), port::big-integer-size(32), rest::binary>> = binary
-      {Network.binary_to_ipv6(host), port, rest}
+      {host, Network.binary_to_ipv6(host), port, rest}
     else
       <<host::bytes-size(4), port::big-integer-size(32), rest::binary>> = binary
-      {Network.binary_to_ipv4(host), port, rest}
+      {host, Network.binary_to_ipv4(host), port, rest}
     end
   end
 
@@ -226,7 +226,7 @@ defmodule ExRocketmq.Models.MessageExt do
     [
       host,
       <<port::big-integer-size(32)>>,
-      <<offset::big-integer-size(32)>>
+      <<offset::big-integer-size(64)>>
     ]
     |> IO.iodata_to_binary()
     |> Base.encode16(case: :upper)

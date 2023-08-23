@@ -149,6 +149,7 @@ defmodule BrokerTest do
                  expression_type: "TAG"
                }
              )
+             |> Debug.debug()
   end
 
   test "search_offset_by_timestamp", %{broker: broker, topic: topic} do
@@ -191,7 +192,22 @@ defmodule BrokerTest do
                  consumer_group: group,
                  topic: topic,
                  queue_id: 1,
-                 commit_offset: offset - 5
+                 commit_offset: offset - 10
+               }
+             )
+  end
+
+  test "consumer_send_msg_back", %{broker: broker, topic: topic, group: group} do
+    assert :ok ==
+             Broker.consumer_send_msg_back(
+               broker,
+               %Models.ConsumerSendMsgBack{
+                 group: group,
+                 offset: 296_368_101_057,
+                 delay_level: 1,
+                 origin_msg_id: "31302E38382E342E3237000051AF000A91F9",
+                 origin_topic: topic,
+                 max_reconsume_times: 3
                }
              )
   end

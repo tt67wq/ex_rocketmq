@@ -141,9 +141,7 @@ defmodule ExRocketmq.Models.SendMsg do
            ext_fields <- Packet.packet(pkt, :ext_fields),
            region_id <- Map.get(ext_fields, "MSG_REGION", "DefaultRegion"),
            trace <- Map.get(ext_fields, "TRACE_ON", ""),
-           msg_id <- Map.get(ext_fields, "msgId", ""),
-           queue_id <- Map.get(ext_fields, "queueId", "0") |> String.to_integer(),
-           offset <- Map.get(ext_fields, "queueOffset") |> String.to_integer() do
+           msg_id <- Map.get(ext_fields, "msgId", "") do
         {:ok,
          %__MODULE__{
            status: status,
@@ -152,14 +150,22 @@ defmodule ExRocketmq.Models.SendMsg do
              # topic and broker_name will be set later
              topic: "",
              broker_name: "",
-             queue_id: queue_id
+             queue_id: get_int_ext_field(ext_fields, "queueId")
            },
-           queue_offset: offset,
+           queue_offset: get_int_ext_field(ext_fields, "queueOffset"),
            transaction_id: Map.get(ext_fields, "transactionId", ""),
            offset_msg_id: Map.get(ext_fields, "msgId", ""),
            region_id: region_id,
            trace_on: trace not in ["false", ""]
          }}
+      end
+    end
+
+    @spec get_int_ext_field(Typespecs.ext_fields(), String.t()) :: non_neg_integer()
+    defp get_int_ext_field(ext_fields, key) do
+      case ext_fields do
+        %{^key => value} -> String.to_integer(value)
+        _ -> 0
       end
     end
 
@@ -176,5 +182,48 @@ defmodule ExRocketmq.Models.SendMsg do
           {:ok, status}
       end
     end
+  end
+end
+
+defmodule ExRocketmq.Models.ConsumerSendMsgBack do
+  @moduledoc """
+  consumer send message back model
+  """
+
+  alias ExRocketmq.{Remote.ExtFields}
+
+  @behaviour ExtFields
+
+  defstruct [
+    :group,
+    :offset,
+    :delay_level,
+    :origin_msg_id,
+    :origin_topic,
+    :unit_mode,
+    :max_reconsume_times
+  ]
+
+  @type t :: %__MODULE__{
+          group: String.t(),
+          offset: non_neg_integer(),
+          delay_level: non_neg_integer(),
+          origin_msg_id: String.t(),
+          origin_topic: String.t(),
+          unit_mode: boolean(),
+          max_reconsume_times: non_neg_integer()
+        }
+
+  @impl ExtFields
+  def to_map(t) do
+    %{
+      "group" => t.group,
+      "offset" => "#{t.offset}",
+      "delayLevel" => "#{t.delay_level}",
+      "originMsgId" => t.origin_msg_id,
+      "originTopic" => t.origin_topic,
+      "unitMode" => "#{t.unit_mode}",
+      "maxReconsumeTimes" => "#{t.max_reconsume_times}"
+    }
   end
 end

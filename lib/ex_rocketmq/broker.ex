@@ -55,6 +55,7 @@ defmodule ExRocketmq.Broker do
   @req_pull_message Request.req_pull_message()
   @req_hearbeat Request.req_heartbeat()
   @resp_success Response.resp_success()
+  @req_consumer_send_msg_back Request.req_consumer_send_msg_back()
 
   @broker_opts_schema [
     broker_name: [
@@ -179,6 +180,23 @@ defmodule ExRocketmq.Broker do
            GenServer.call(broker, {:rpc, @req_get_max_offset, <<>>, ext_fields}),
          ext_fields <- Packet.packet(pkt, :ext_fields) do
       {:ok, Map.get(ext_fields, "offset", "0") |> String.to_integer()}
+    end
+  end
+
+  @spec consumer_send_msg_back(pid(), ConsumerSendMsgBack.t()) ::
+          :ok | Typespecs.error_t()
+  def consumer_send_msg_back(broker, req) do
+    with ext_fields <- ExtFields.to_map(req),
+         {:ok, pkt} <-
+           GenServer.call(broker, {:rpc, @req_consumer_send_msg_back, <<>>, ext_fields}) do
+      case Packet.packet(pkt, :code) do
+        @resp_success ->
+          :ok
+
+        code ->
+          remark = Packet.packet(pkt, :remark)
+          {:error, %{code: code, remark: remark}}
+      end
     end
   end
 
