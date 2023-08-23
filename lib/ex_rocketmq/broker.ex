@@ -30,6 +30,7 @@ defmodule ExRocketmq.Broker do
     Models.SendMsg,
     Models.PullMsg,
     Models.QueryConsumerOffset,
+    Models.SearchOffset,
     Protocol.Request,
     Protocol.Response
   }
@@ -43,6 +44,7 @@ defmodule ExRocketmq.Broker do
 
   @req_send_message Request.req_send_message()
   @req_query_consumer_offset Request.req_query_consumer_offset()
+  @req_search_offset_by_timestamp Request.req_search_offset_by_timestamp()
   @req_pull_message Request.req_pull_message()
   @req_hearbeat Request.req_heartbeat()
   @resp_success Response.resp_success()
@@ -132,12 +134,23 @@ defmodule ExRocketmq.Broker do
     end
   end
 
-  @spec query_message(pid(), QueryConsumerOffset.t()) ::
+  @spec query_consumer_offset(pid(), QueryConsumerOffset.t()) ::
           {:ok, non_neg_integer()} | Typespecs.error_t()
-  def query_message(broker, req) do
+  def query_consumer_offset(broker, req) do
     with ext_fields <- ExtFields.to_map(req),
          {:ok, pkt} <-
            GenServer.call(broker, {:rpc, @req_query_consumer_offset, <<>>, ext_fields}),
+         ext_fields <- Packet.packet(pkt, :ext_fields) do
+      {:ok, Map.get(ext_fields, "offset", "0") |> String.to_integer()}
+    end
+  end
+
+  @spec search_offset_by_timestamp(pid(), SearchOffset.t()) ::
+          {:ok, non_neg_integer()} | Typespecs.error_t()
+  def search_offset_by_timestamp(broker, req) do
+    with ext_fields <- ExtFields.to_map(req),
+         {:ok, pkt} <-
+           GenServer.call(broker, {:rpc, @req_search_offset_by_timestamp, <<>>, ext_fields}),
          ext_fields <- Packet.packet(pkt, :ext_fields) do
       {:ok, Map.get(ext_fields, "offset", "0") |> String.to_integer()}
     end

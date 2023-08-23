@@ -24,15 +24,36 @@ defmodule BrokerTest do
     [broker: pid, topic: topic, group: group]
   end
 
-  test "send_hearbeat", %{broker: broker} do
+  test "send_hearbeat", %{broker: broker, group: group, topic: topic} do
     assert :ok ==
-             Broker.heartbeat(broker, %ExRocketmq.Models.Heartbeat{
+             Broker.heartbeat(broker, %Models.Heartbeat{
                client_id: "test",
                producer_data_set:
                  MapSet.new([
-                   %ExRocketmq.Models.ProducerData{group: "test"}
+                   %Models.ProducerData{group: "test"}
                  ]),
-               consumer_data_set: MapSet.new()
+               consumer_data_set:
+                 MapSet.new([
+                   %Models.ConsumerData{
+                     group: group,
+                     consume_type: "CONSUME_ACTIVELY",
+                     message_model: "Clustering",
+                     consume_from_where: "CONSUME_FROM_LAST_OFFSET",
+                     subscription_data_set:
+                       MapSet.new([
+                         %Models.Subscription{
+                           class_filter_mode: true,
+                           topic: topic,
+                           sub_string: "*",
+                           tags_set: MapSet.new([]),
+                           code_set: MapSet.new([]),
+                           sub_version: 0,
+                           expression_type: "TAG"
+                         }
+                       ]),
+                     unit_mode: false
+                   }
+                 ])
              })
              |> Debug.debug()
   end
@@ -103,6 +124,16 @@ defmodule BrokerTest do
   end
 
   test "pull_message", %{broker: broker, topic: topic, group: group} do
+    assert {:ok, offset} =
+             Broker.query_consumer_offset(
+               broker,
+               %Models.QueryConsumerOffset{
+                 consumer_group: group,
+                 topic: topic,
+                 queue_id: 1
+               }
+             )
+
     assert {:ok, _} =
              Broker.pull_message(
                broker,
@@ -110,7 +141,7 @@ defmodule BrokerTest do
                  consumer_group: group,
                  topic: topic,
                  queue_id: 1,
-                 queue_offset: 692_670,
+                 queue_offset: offset - 5,
                  max_msg_nums: 5,
                  sys_flag: 0,
                  commit_offset: 0,
@@ -123,14 +154,14 @@ defmodule BrokerTest do
              |> Debug.debug()
   end
 
-  test "query_consumer_offset", %{broker: broker, topic: topic, group: group} do
+  test "search_offset_by_timestamp", %{broker: broker, topic: topic} do
     assert {:ok, _} =
-             Broker.query_message(
+             Broker.search_offset_by_timestamp(
                broker,
-               %Models.QueryConsumerOffset{
-                 consumer_group: group,
+               %Models.SearchOffset{
                  topic: topic,
-                 queue_id: 1
+                 queue_id: 1,
+                 timestamp: :os.system_time(:millisecond)
                }
              )
              |> Debug.debug()
