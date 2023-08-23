@@ -122,4 +122,17 @@ defmodule BrokerTest do
              )
              |> Debug.debug()
   end
+
+  test "query_consumer_offset", %{broker: broker, topic: topic, group: group} do
+    assert {:ok, _} =
+             Broker.query_message(
+               broker,
+               %Models.QueryConsumerOffset{
+                 consumer_group: group,
+                 topic: topic,
+                 queue_id: 1
+               }
+             )
+             |> Debug.debug()
+  end
 end

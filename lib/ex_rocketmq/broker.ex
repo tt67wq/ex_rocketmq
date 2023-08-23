@@ -29,6 +29,7 @@ defmodule ExRocketmq.Broker do
     Models.Heartbeat,
     Models.SendMsg,
     Models.PullMsg,
+    Models.QueryConsumerOffset,
     Protocol.Request,
     Protocol.Response
   }
@@ -41,6 +42,7 @@ defmodule ExRocketmq.Broker do
   use GenServer
 
   @req_send_message Request.req_send_message()
+  @req_query_consumer_offset Request.req_query_consumer_offset()
   @req_pull_message Request.req_pull_message()
   @req_hearbeat Request.req_heartbeat()
   @resp_success Response.resp_success()
@@ -95,38 +97,49 @@ defmodule ExRocketmq.Broker do
 
   @spec sync_send_message(pid(), SendMsg.Request.t(), binary()) ::
           {:ok, SendMsg.Response.t()} | Typespecs.error_t()
-  def sync_send_message(broker, header, body) do
-    with ext_fields <- ExtFields.to_map(header),
+  def sync_send_message(broker, req, body) do
+    with ext_fields <- ExtFields.to_map(req),
          {:ok, pkt} <-
            GenServer.call(broker, {:rpc, @req_send_message, body, ext_fields}, 10_000),
          {:ok, resp} <- SendMsg.Response.from_pkt(pkt) do
-      q = %{resp.queue | topic: header.topic, broker_name: GenServer.call(broker, :broker_name)}
+      q = %{resp.queue | topic: req.topic, broker_name: GenServer.call(broker, :broker_name)}
       {:ok, %{resp | queue: q}}
     end
   end
 
   @spec async_send_message(pid(), SendMsg.Request.t(), binary()) :: Task.t()
-  def async_send_message(broker, header, body) do
+  def async_send_message(broker, req, body) do
     Task.async(fn ->
-      sync_send_message(broker, header, body)
+      sync_send_message(broker, req, body)
     end)
   end
 
   @spec one_way_send_message(pid(), SendMsg.Request.t(), binary()) ::
           :ok
-  def one_way_send_message(broker, header, body) do
-    with ext_fields <- ExtFields.to_map(header) do
+  def one_way_send_message(broker, req, body) do
+    with ext_fields <- ExtFields.to_map(req) do
       GenServer.cast(broker, {:one_way, @req_send_message, body, ext_fields})
     end
   end
 
   @spec pull_message(pid(), PullMsg.Request.t()) ::
           {:ok, PullMsg.Response.t()} | Typespecs.error_t()
-  def pull_message(broker, header) do
-    with ext_fields <- ExtFields.to_map(header),
+  def pull_message(broker, req) do
+    with ext_fields <- ExtFields.to_map(req),
          {:ok, pkt} <- GenServer.call(broker, {:rpc, @req_pull_message, <<>>, ext_fields}),
          {:ok, resp} <- PullMsg.Response.from_pkt(pkt) do
       {:ok, resp}
+    end
+  end
+
+  @spec query_message(pid(), QueryConsumerOffset.t()) ::
+          {:ok, non_neg_integer()} | Typespecs.error_t()
+  def query_message(broker, req) do
+    with ext_fields <- ExtFields.to_map(req),
+         {:ok, pkt} <-
+           GenServer.call(broker, {:rpc, @req_query_consumer_offset, <<>>, ext_fields}),
+         ext_fields <- Packet.packet(pkt, :ext_fields) do
+      {:ok, Map.get(ext_fields, "offset", "0") |> String.to_integer()}
     end
   end
 
