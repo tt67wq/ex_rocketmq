@@ -60,10 +60,17 @@ defmodule ExRocketmq.Models.Message do
   def decode_properties(data) do
     data
     |> :binary.split(@property_sep)
-    |> Enum.reduce(%{}, fn bin, acc ->
-      [k, v] = :binary.split(bin, @property_kv_sep)
-      Map.put(acc, k, v)
-    end)
+    |> Enum.reduce(
+      %{},
+      fn
+        "", acc ->
+          acc
+
+        bin, acc ->
+          [k, v] = :binary.split(bin, @property_kv_sep)
+          Map.put(acc, k, v)
+      end
+    )
   end
 end
 

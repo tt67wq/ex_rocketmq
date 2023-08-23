@@ -25,10 +25,10 @@ defmodule ExRocketmq.Broker do
     Typespecs,
     Remote,
     Remote.Packet,
-    Remote.Error,
     Remote.ExtFields,
     Models.Heartbeat,
     Models.SendMsg,
+    Models.PullMsg,
     Protocol.Request,
     Protocol.Response
   }
@@ -41,6 +41,7 @@ defmodule ExRocketmq.Broker do
   use GenServer
 
   @req_send_message Request.req_send_message()
+  @req_pull_message Request.req_pull_message()
   @req_hearbeat Request.req_heartbeat()
   @resp_success Response.resp_success()
 
@@ -87,7 +88,7 @@ defmodule ExRocketmq.Broker do
 
         code ->
           remark = resp_msg |> Packet.packet(:remark)
-          {:error, Error.new(code, remark)}
+          {:error, %{code: code, remark: remark}}
       end
     end
   end
@@ -96,8 +97,9 @@ defmodule ExRocketmq.Broker do
           {:ok, SendMsg.Response.t()} | Typespecs.error_t()
   def sync_send_message(broker, header, body) do
     with ext_fields <- ExtFields.to_map(header),
-         {:ok, pkt} <- GenServer.call(broker, {:rpc, @req_send_message, body, ext_fields}),
-         resp <- SendMsg.Response.from_pkt(pkt) do
+         {:ok, pkt} <-
+           GenServer.call(broker, {:rpc, @req_send_message, body, ext_fields}, 10_000),
+         {:ok, resp} <- SendMsg.Response.from_pkt(pkt) do
       q = %{resp.queue | topic: header.topic, broker_name: GenServer.call(broker, :broker_name)}
       {:ok, %{resp | queue: q}}
     end
@@ -115,6 +117,16 @@ defmodule ExRocketmq.Broker do
   def one_way_send_message(broker, header, body) do
     with ext_fields <- ExtFields.to_map(header) do
       GenServer.cast(broker, {:one_way, @req_send_message, body, ext_fields})
+    end
+  end
+
+  @spec pull_message(pid(), PullMsg.Request.t()) ::
+          {:ok, PullMsg.Response.t()} | Typespecs.error_t()
+  def pull_message(broker, header) do
+    with ext_fields <- ExtFields.to_map(header),
+         {:ok, pkt} <- GenServer.call(broker, {:rpc, @req_pull_message, <<>>, ext_fields}),
+         {:ok, resp} <- PullMsg.Response.from_pkt(pkt) do
+      {:ok, resp}
     end
   end
 

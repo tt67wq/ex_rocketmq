@@ -10,7 +10,8 @@ defmodule BrokerTest do
     %{
       "host" => host,
       "port" => port,
-      "topic" => topic
+      "topic" => topic,
+      "group" => group
     } =
       File.read!("./tmp/broker.json") |> Jason.decode!()
 
@@ -20,7 +21,7 @@ defmodule BrokerTest do
     ]
 
     pid = start_supervised!({Broker, opts})
-    [broker: pid, topic: topic]
+    [broker: pid, topic: topic, group: group]
   end
 
   test "send_hearbeat", %{broker: broker} do
@@ -99,5 +100,26 @@ defmodule BrokerTest do
                },
                msg.body
              )
+  end
+
+  test "pull_message", %{broker: broker, topic: topic, group: group} do
+    assert {:ok, _} =
+             Broker.pull_message(
+               broker,
+               %Models.PullMsg.Request{
+                 consumer_group: group,
+                 topic: topic,
+                 queue_id: 1,
+                 queue_offset: 692_670,
+                 max_msg_nums: 5,
+                 sys_flag: 0,
+                 commit_offset: 0,
+                 suspend_timeout_millis: 0,
+                 sub_expression: "*",
+                 sub_version: 0,
+                 expression_type: "TAG"
+               }
+             )
+             |> Debug.debug()
   end
 end

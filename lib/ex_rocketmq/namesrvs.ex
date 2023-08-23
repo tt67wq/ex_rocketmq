@@ -9,7 +9,6 @@ defmodule ExRocketmq.Namesrvs do
     Remote,
     Typespecs,
     Remote.Packet,
-    Remote.Error,
     Protocol.Request,
     Protocol.Response,
     Models
@@ -99,7 +98,7 @@ defmodule ExRocketmq.Namesrvs do
           |> then(&{:ok, &1})
 
         code ->
-          {:error, Error.new(code, Packet.packet(msg, :remark))}
+          {:error, %{code: code, remark: Packet.packet(msg, :remark)}}
       end
     end
   end
@@ -141,7 +140,7 @@ defmodule ExRocketmq.Namesrvs do
           |> then(&{:ok, &1})
 
         code ->
-          {:error, Error.new(code, Packet.packet(msg, :remark))}
+          {:error, %{code: code, remark: Packet.packet(msg, :remark)}}
       end
     end
   end

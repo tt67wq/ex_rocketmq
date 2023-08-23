@@ -59,7 +59,13 @@ defmodule ExRocketmq.Models.PullMsg do
   defmodule Response do
     @moduledoc false
 
-    alias ExRocketmq.{Remote.Packet, Protocol.Response, Protocol.PullStatus, Typespecs}
+    alias ExRocketmq.{
+      Remote.Packet,
+      Protocol.Response,
+      Protocol.PullStatus,
+      Typespecs,
+      Models.MessageExt
+    }
 
     require Packet
     require Response
@@ -71,18 +77,9 @@ defmodule ExRocketmq.Models.PullMsg do
       :max_offset,
       :status,
       :suggest_which_broker_id,
-      :body
+      :body,
+      :messages
     ]
-
-    @resp_success Response.resp_success()
-    @resp_pull_not_found Response.resp_pull_not_found()
-    @resp_pull_retry_immediately Response.resp_pull_retry_immediately()
-    @resp_pull_offset_moved Response.resp_pull_offset_moved()
-
-    @pull_found PullStatus.pull_found()
-    @pull_no_new_msg PullStatus.pull_no_new_msg()
-    @pull_no_matched_msg PullStatus.pull_no_matched_msg()
-    @pull_offset_illegal PullStatus.pull_offset_illegal()
 
     @type t :: %__MODULE__{
             next_begin_offset: non_neg_integer(),
@@ -90,30 +87,45 @@ defmodule ExRocketmq.Models.PullMsg do
             max_offset: non_neg_integer(),
             status: non_neg_integer(),
             suggest_which_broker_id: non_neg_integer(),
-            body: binary()
+            body: binary(),
+            messages: [MessageExt.t()]
           }
+    @status_code_map %{
+      Response.resp_success() => PullStatus.pull_found(),
+      Response.resp_pull_not_found() => PullStatus.pull_no_new_msg(),
+      Response.resp_pull_retry_immediately() => PullStatus.pull_no_matched_msg(),
+      Response.resp_pull_offset_moved() => PullStatus.pull_offset_illegal()
+    }
 
-    @spec from_pkt(Packet.t()) :: t()
+    @spec from_pkt(Packet.t()) :: {:ok, t()} | Typespecs.error_t()
     def from_pkt(pkt) do
-      status =
-        case Packet.packet(pkt, :code) do
-          @resp_success -> @pull_found
-          @resp_pull_not_found -> @pull_no_new_msg
-          @resp_pull_retry_immediately -> @pull_no_matched_msg
-          @resp_pull_offset_moved -> @pull_offset_illegal
-          other_code -> raise "unknown response code: #{other_code}"
-        end
+      with {:ok, status} <- get_status(pkt) do
+        ext_fields = Packet.packet(pkt, :ext_fields)
 
-      ext_fields = Packet.packet(pkt, :ext_fields)
+        {:ok,
+         %__MODULE__{
+           next_begin_offset: get_int_ext_field(ext_fields, "nextBeginOffset"),
+           min_offset: get_int_ext_field(ext_fields, "minOffset"),
+           max_offset: get_int_ext_field(ext_fields, "maxOffset"),
+           status: status,
+           suggest_which_broker_id: get_int_ext_field(ext_fields, "suggestWhichBrokerId"),
+           body: Packet.packet(pkt, :body),
+           messages: MessageExt.decode_from_binary(Packet.packet(pkt, :body))
+         }}
+      end
+    end
 
-      %__MODULE__{
-        next_begin_offset: get_int_ext_field(ext_fields, "nextBeginOffset"),
-        min_offset: get_int_ext_field(ext_fields, "minOffset"),
-        max_offset: get_int_ext_field(ext_fields, "maxOffset"),
-        status: status,
-        suggest_which_broker_id: get_int_ext_field(ext_fields, "suggestWhichBrokerId"),
-        body: Packet.packet(pkt, :body)
-      }
+    @spec get_status(Packet.t()) :: {:ok, non_neg_integer()} | Typespecs.error_t()
+    defp get_status(pkt) do
+      @status_code_map
+      |> Map.get(Packet.packet(pkt, :code))
+      |> case do
+        nil ->
+          {:error, %{code: Packet.packet(pkt, :code), remark: Packet.packet(pkt, :remark)}}
+
+        status ->
+          {:ok, status}
+      end
     end
 
     @spec get_int_ext_field(Typespecs.ext_fields(), String.t()) :: non_neg_integer()
