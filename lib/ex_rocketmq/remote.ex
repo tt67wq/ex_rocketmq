@@ -72,7 +72,7 @@ defmodule ExRocketmq.Remote do
   end
 
   def init(opts) do
-    waiter = Waiter.new(name: :"#{Random.random_uuid(12)}")
+    waiter = Waiter.new(name: :"#{Random.generate_id("W")}")
     {:ok, _} = Waiter.start_link(waiter: waiter)
     {:ok, notify} = Queue.start_link()
 

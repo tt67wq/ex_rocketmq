@@ -211,4 +211,10 @@ defmodule BrokerTest do
                }
              )
   end
+
+  test "get_consumer_list_by_group", %{broker: broker, group: group} do
+    assert {:ok, _} =
+             Broker.get_consumer_list_by_group(broker, group)
+             |> Debug.debug()
+  end
 end

@@ -10,9 +10,10 @@ defmodule ExRocketmq.Remote.Waiter do
   defstruct [:name, :interval]
 
   @type t :: %__MODULE__{
-          name: Typespecs.name(),
+          name: atom(),
           interval: non_neg_integer()
         }
+
   @type key :: Typespecs.opaque()
   @type value :: {pid(), any()} | nil
 
@@ -64,7 +65,7 @@ defmodule ExRocketmq.Remote.Waiter do
 
   @impl true
   def init(waiter) do
-    :ets.new(waiter.name, [:named_table, :public, :set])
+    :ets.new(waiter.name, [:named_table, :public, :set, {:read_concurrency, true}])
     {:ok, %{name: waiter.name, interval: waiter.interval}, {:continue, :begin}}
   end
 

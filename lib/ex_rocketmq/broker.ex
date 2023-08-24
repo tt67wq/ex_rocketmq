@@ -56,6 +56,7 @@ defmodule ExRocketmq.Broker do
   @req_hearbeat Request.req_heartbeat()
   @resp_success Response.resp_success()
   @req_consumer_send_msg_back Request.req_consumer_send_msg_back()
+  @req_get_consumer_list_by_group Request.req_get_consumer_list_by_group()
 
   @broker_opts_schema [
     broker_name: [
@@ -197,6 +198,17 @@ defmodule ExRocketmq.Broker do
           remark = Packet.packet(pkt, :remark)
           {:error, %{code: code, remark: remark}}
       end
+    end
+  end
+
+  @spec get_consumer_list_by_group(pid(), String.t()) ::
+          {:ok, list(String.t())} | Typespecs.error_t()
+  def get_consumer_list_by_group(broker, group) do
+    with ext_field <- %{"consumerGroup" => group},
+         {:ok, pkt} <-
+           GenServer.call(broker, {:rpc, @req_get_consumer_list_by_group, <<>>, ext_field}),
+         {:ok, %{"consumerIdList" => consumer_list}} <- Jason.decode(Packet.packet(pkt, :body)) do
+      {:ok, consumer_list}
     end
   end
 
