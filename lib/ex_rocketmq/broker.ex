@@ -37,7 +37,8 @@ defmodule ExRocketmq.Broker do
     QueryConsumerOffset,
     UpdateConsumerOffset,
     SearchOffset,
-    GetMaxOffset
+    GetMaxOffset,
+    EndTransaction
   }
 
   require Packet
@@ -56,6 +57,7 @@ defmodule ExRocketmq.Broker do
   @req_hearbeat Request.req_heartbeat()
   @resp_success Response.resp_success()
   @req_consumer_send_msg_back Request.req_consumer_send_msg_back()
+  @req_end_transaction Request.req_end_transaction()
   @req_get_consumer_list_by_group Request.req_get_consumer_list_by_group()
 
   @broker_opts_schema [
@@ -211,6 +213,15 @@ defmodule ExRocketmq.Broker do
       {:ok, consumer_list}
     end
   end
+
+  @spec end_transaction(pid(), EndTransaction.t()) :: :ok | Typespecs.error_t()
+  def end_transaction(broker, req) do
+    with ext_fields <- ExtFields.to_map(req) do
+      GenServer.cast(broker, {:one_way, @req_end_transaction, <<>>, ext_fields})
+    end
+  end
+
+  # ------- server ------
 
   def init(opts) do
     {:ok, remote_pid} = Remote.start_link(opts[:remote])

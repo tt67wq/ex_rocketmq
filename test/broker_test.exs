@@ -217,4 +217,20 @@ defmodule BrokerTest do
              Broker.get_consumer_list_by_group(broker, group)
              |> Debug.debug()
   end
+
+  # test "end_transaction", %{broker: broker, topic: topic, group: group} do
+  #   assert :ok =
+  #            Broker.end_transaction(
+  #              broker,
+  #              %Models.EndTransaction{
+  #                producer_group: group,
+  #                tran_state_table_offset: 0,
+  #                commit_log_offset: 0,
+  #                commit_or_rollback: 0,
+  #                from_transaction_check: false,
+  #                msg_id: "31302E38382E342E3237000051AF000A91F9",
+  #                transaction_id: "test"
+  #              }
+  #            )
+  # end
 end
