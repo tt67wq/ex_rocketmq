@@ -38,7 +38,8 @@ defmodule ExRocketmq.Broker do
     UpdateConsumerOffset,
     SearchOffset,
     GetMaxOffset,
-    EndTransaction
+    EndTransaction,
+    Lock
   }
 
   require Packet
@@ -59,6 +60,8 @@ defmodule ExRocketmq.Broker do
   @req_consumer_send_msg_back Request.req_consumer_send_msg_back()
   @req_end_transaction Request.req_end_transaction()
   @req_get_consumer_list_by_group Request.req_get_consumer_list_by_group()
+  @req_lock_batch_mq Request.req_lock_batch_mq()
+  @req_unlock_batch_mq Request.req_unlock_batch_mq()
 
   @broker_opts_schema [
     broker_name: [
@@ -218,6 +221,30 @@ defmodule ExRocketmq.Broker do
   def end_transaction(broker, req) do
     with ext_fields <- ExtFields.to_map(req) do
       GenServer.cast(broker, {:one_way, @req_end_transaction, <<>>, ext_fields})
+    end
+  end
+
+  @spec lock_batch_mq(pid(), Lock.Req.t()) :: {:ok, Lock.Resp.t()} | Typespecs.error_t()
+  def lock_batch_mq(broker, req) do
+    with body <- Lock.Req.encode(req),
+         {:ok, pkt} <- GenServer.call(broker, {:rpc, @req_lock_batch_mq, body, %{}}),
+         body <- Packet.packet(pkt, :body) do
+      {:ok, Lock.Resp.decode(body)}
+    end
+  end
+
+  @spec unlock_batch_mq(pid(), Lock.Req.t()) :: :ok | Typespecs.error_t()
+  def unlock_batch_mq(broker, req) do
+    with body <- Lock.Req.encode(req),
+         {:ok, pkt} <- GenServer.call(broker, {:rpc, @req_unlock_batch_mq, body, %{}}) do
+      case Packet.packet(pkt, :code) do
+        @resp_success ->
+          :ok
+
+        code ->
+          remark = Packet.packet(pkt, :remark)
+          {:error, %{code: code, remark: remark}}
+      end
     end
   end
 

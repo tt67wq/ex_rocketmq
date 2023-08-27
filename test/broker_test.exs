@@ -11,7 +11,8 @@ defmodule BrokerTest do
       "host" => host,
       "port" => port,
       "topic" => topic,
-      "group" => group
+      "group" => group,
+      "broker_name" => broker_name
     } =
       File.read!("./tmp/broker.json") |> Jason.decode!()
 
@@ -21,7 +22,7 @@ defmodule BrokerTest do
     ]
 
     pid = start_supervised!({Broker, opts})
-    [broker: pid, topic: topic, group: group]
+    [broker: pid, topic: topic, group: group, broker_name: broker_name]
   end
 
   test "send_hearbeat", %{broker: broker, group: group, topic: topic} do
@@ -149,7 +150,8 @@ defmodule BrokerTest do
                  expression_type: "TAG"
                }
              )
-             |> Debug.debug()
+
+    #  |> Debug.debug()
   end
 
   test "search_offset_by_timestamp", %{broker: broker, topic: topic} do
@@ -215,7 +217,6 @@ defmodule BrokerTest do
   test "get_consumer_list_by_group", %{broker: broker, group: group} do
     assert {:ok, _} =
              Broker.get_consumer_list_by_group(broker, group)
-             |> Debug.debug()
   end
 
   # test "end_transaction", %{broker: broker, topic: topic, group: group} do
@@ -233,4 +234,33 @@ defmodule BrokerTest do
   #              }
   #            )
   # end
+
+  test "lock_batch_mq", %{broker: broker, topic: topic, group: group, broker_name: broker_name} do
+    req = %Models.Lock.Req{
+      consumer_group: group,
+      client_id: "test",
+      mq:
+        MapSet.new([
+          %Models.MessageQueue{
+            topic: topic,
+            broker_name: broker_name,
+            queue_id: 0
+          }
+        ])
+    }
+
+    assert {:ok, _} =
+             Broker.lock_batch_mq(
+               broker,
+               req
+             )
+             |> Debug.debug()
+
+    assert :ok =
+             Broker.unlock_batch_mq(
+               broker,
+               req
+             )
+             |> Debug.debug()
+  end
 end
