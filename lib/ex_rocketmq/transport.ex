@@ -9,6 +9,7 @@ defmodule ExRocketmq.Transport do
 
   @callback new(Typespecs.opts()) :: t()
   @callback start(t()) :: {:ok, t()} | error_t()
+  @callback stop(t()) :: :ok
   @callback output(transport :: t(), msg :: binary()) ::
               :ok | error_t()
   @callback recv(transport :: t()) ::
@@ -19,6 +20,9 @@ defmodule ExRocketmq.Transport do
 
   @spec start(t()) :: {:ok, t()} | error_t()
   def start(%module{} = m), do: apply(module, :start, [m])
+
+  @spec stop(t()) :: :ok
+  def stop(%module{} = m), do: apply(module, :stop, [m])
 
   @doc """
   output a pkt by transport layer

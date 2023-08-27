@@ -71,16 +71,17 @@ defmodule ExRocketmq.Remote do
     GenServer.start_link(__MODULE__, args, opts)
   end
 
+  @spec stop(pid()) :: :ok
+  def stop(remote), do: GenServer.stop(remote)
+
   def init(opts) do
-    waiter = Waiter.new(name: :"#{Random.generate_id("W")}")
-    {:ok, _} = Waiter.start_link(waiter: waiter)
     {:ok, notify} = Queue.start_link()
 
     {:ok,
      %{
        transport: opts[:transport],
        serializer: opts[:serializer],
-       waiter: waiter,
+       waiter: Waiter.start(name: :"#{Random.generate_id("W")}"),
        notify: notify
      }, {:continue, :connect}}
   end
@@ -90,7 +91,6 @@ defmodule ExRocketmq.Remote do
     Transport.start(transport)
     |> case do
       {:ok, t} ->
-        Logger.debug(%{"msg" => "connected", "host" => transport.host, "port" => transport.port})
         Process.send_after(self(), :recv, 0)
         {:noreply, %{state | transport: t}}
 
@@ -123,8 +123,6 @@ defmodule ExRocketmq.Remote do
         :recv,
         %{transport: transport, serializer: serializer, waiter: waiter, notify: queue} = state
       ) do
-    Logger.debug("recv: waiting")
-
     with {:ok, data} <- Transport.recv(transport),
          {:ok, pkt} <- Serializer.decode(serializer, data) do
       if Packet.response_type?(pkt) do
@@ -136,12 +134,11 @@ defmodule ExRocketmq.Remote do
       Process.send_after(self(), :recv, 0)
     else
       {:error, :timeout} ->
-        Logger.warning(%{"msg" => "recv timeout"})
         Process.send_after(self(), :recv, 0)
 
       {:error, reason} ->
         # maybe reconnecting
-        Logger.warning(%{"msg" => "recv error", "reason" => inspect(reason)})
+        Logger.warning("recv error: #{inspect(reason)}")
         Process.send_after(self(), :recv, 2000)
     end
 
@@ -164,8 +161,20 @@ defmodule ExRocketmq.Remote do
 
   defp process_notify(pkt, queue), do: Queue.push(queue, pkt)
 
-  def terminate(reason, state) do
-    Logger.warning(%{"msg" => "terminated", "reason" => inspect(reason)})
-    {:ok, state}
+  def terminate(reason, %{transport: transport, waiter: waiter, notify: notify}) do
+    Logger.info("remote terminated with reason: #{inspect(reason)}")
+
+    # stop the transport connection
+    transport
+    |> is_nil()
+    |> unless do
+      Transport.stop(transport)
+    end
+
+    # stop the waiter
+    Waiter.stop(waiter)
+
+    # stop the notify queue
+    Queue.stop(notify)
   end
 end

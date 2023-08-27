@@ -7,24 +7,36 @@ defmodule ExRocketmq.Remote.Waiter do
 
   use GenServer
 
-  defstruct [:name, :interval]
+  defstruct [:name, :pid, :interval]
 
   @type t :: %__MODULE__{
           name: atom(),
+          pid: pid(),
           interval: non_neg_integer()
         }
 
   @type key :: Typespecs.opaque()
   @type value :: {pid(), any()} | nil
 
-  @spec new(Typespecs.opts()) :: t()
-  def new(opts) do
-    opts =
-      opts
-      |> Keyword.put_new(:interval, 5000)
+  @opts_schema [
+    name: [
+      type: :atom,
+      required: true,
+      doc: "The name of the waiter"
+    ],
+    interval: [
+      type: :integer,
+      default: 5000,
+      doc: "The cleanup interval time in millisecond of the waiter"
+    ],
+    opts: [
+      type: :keyword_list,
+      default: [],
+      doc: "The other options of the waiter"
+    ]
+  ]
 
-    struct(__MODULE__, opts)
-  end
+  @type opts_schema_t :: [unquote(NimbleOptions.option_typespec(@opts_schema))]
 
   @spec pop(t(), Typespecs.opaque()) :: value()
   def pop(waiter, key) do
@@ -57,16 +69,24 @@ defmodule ExRocketmq.Remote.Waiter do
 
   def put(waiter, key, value, []), do: put(waiter, key, value, ttl: :infinity)
 
-  @spec start_link(Typespecs.opts()) :: Typespecs.on_start()
-  def start_link(opts) do
-    {waiter, opts} = Keyword.pop!(opts, :waiter)
-    GenServer.start_link(__MODULE__, waiter, opts)
+  @spec start(opts_schema_t()) :: t()
+  def start(opts) do
+    {opts, init} =
+      opts
+      |> NimbleOptions.validate!(@opts_schema)
+      |> Keyword.pop(:opts)
+
+    {:ok, pid} = GenServer.start_link(__MODULE__, init, opts)
+    %__MODULE__{pid: pid, name: init[:name], interval: init[:interval]}
   end
 
+  @spec stop(t()) :: :ok
+  def stop(%{pid: pid}) when not is_nil(pid), do: GenServer.stop(pid)
+
   @impl true
-  def init(waiter) do
-    :ets.new(waiter.name, [:named_table, :public, :set, {:read_concurrency, true}])
-    {:ok, %{name: waiter.name, interval: waiter.interval}, {:continue, :begin}}
+  def init(opts) do
+    :ets.new(opts[:name], [:named_table, :public, :set, {:read_concurrency, true}])
+    {:ok, %{name: opts[:name], interval: opts[:interval]}, {:continue, :begin}}
   end
 
   @impl true
@@ -99,5 +119,11 @@ defmodule ExRocketmq.Remote.Waiter do
 
     Process.send_after(self(), :cleanup, interval)
     {:noreply, state}
+  end
+
+  @impl true
+  def terminate(_reason, %{name: name}) do
+    :ets.delete_all_objects(name)
+    :ets.delete(name)
   end
 end

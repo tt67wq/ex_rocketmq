@@ -85,6 +85,11 @@ defmodule ExRocketmq.Transport.Tcp do
     {:ok, %{transport | pid: pid}}
   end
 
+  @impl Transport
+  def stop(%{pid: pid}) do
+    GenServer.stop(pid, :normal)
+  end
+
   @impl Connection
   def init({host, port, timeout, sockopts}) do
     {:connect, :init,
@@ -101,26 +106,11 @@ defmodule ExRocketmq.Transport.Tcp do
   @impl Connection
   def connect(
         :backoff,
-        %{sock: nil, host: host, port: port, timeout: timeout, sockopts: sockopts, retry: 3} =
+        %{sock: nil, host: host, port: port, retry: 3} =
           s
       ) do
-    Logger.info(%{"msg" => "backoff", "host" => host, "port" => port})
-
-    do_connect(host, port, sockopts, timeout)
-    |> case do
-      {:ok, sock} ->
-        {:ok, %{s | sock: sock, retry: 0}}
-
-      {:error, reason} ->
-        Logger.error(%{
-          "reason" => reason,
-          "host" => host,
-          "port" => port,
-          "msg" => "connect error"
-        })
-
-        {:stop, reason, s}
-    end
+    Logger.error("retrying to connect to #{host}:#{port} after 3 attempts")
+    {:stop, :connect_failed, %{s | sock: nil}}
   end
 
   def connect(
@@ -135,7 +125,7 @@ defmodule ExRocketmq.Transport.Tcp do
         } =
           s
       ) do
-    Logger.info(%{"msg" => "backoff", "host" => host, "port" => port})
+    Logger.info("retrying to connect to #{host}:#{port} after #{retry} attempts")
 
     do_connect(host, port, sockopts, timeout)
     |> case do
@@ -143,13 +133,8 @@ defmodule ExRocketmq.Transport.Tcp do
         {:ok, %{s | sock: sock, retry: 0}}
 
       {:error, reason} ->
-        Logger.error(%{
-          "reason" => reason,
-          "host" => host,
-          "port" => port,
-          "msg" => "connect error"
-        })
-
+        reason = :inet.format_error(reason)
+        Logger.error("connect error: #{reason}, host: #{host}, port: #{port}")
         {:backoff, 2 ** retry * 1000, %{s | retry: retry + 1}}
     end
   end
@@ -164,20 +149,13 @@ defmodule ExRocketmq.Transport.Tcp do
         {:ok, %{s | sock: sock}}
 
       {:error, reason} ->
-        Logger.error(%{
-          "reason" => reason,
-          "host" => host,
-          "port" => port,
-          "msg" => "connect error"
-        })
-
+        reason = :inet.format_error(reason)
+        Logger.error("connect error: #{reason}, host: #{host}, port: #{port}")
         {:backoff, 1000, s}
     end
   end
 
   defp do_connect(host, port, sockopts, timeout) do
-    Logger.info(%{"msg" => "connecting", "host" => host, "port" => port})
-
     :gen_tcp.connect(
       host,
       port,
@@ -187,7 +165,7 @@ defmodule ExRocketmq.Transport.Tcp do
   end
 
   @impl Connection
-  def disconnect(info, %{sock: sock} = s) do
+  def disconnect(info, %{sock: sock, host: host, port: port} = s) do
     :ok = :gen_tcp.close(sock)
 
     case info do
@@ -195,22 +173,11 @@ defmodule ExRocketmq.Transport.Tcp do
         Connection.reply(from, :ok)
 
       {:error, :closed} ->
-        Logger.warning(%{
-          "host" => s.host,
-          "port" => s.port,
-          "reason" => "closed",
-          "msg" => "disconnect"
-        })
+        Logger.warning("socket closed, host: #{host}, port: #{port}")
 
       {:error, reason} ->
         reason = :inet.format_error(reason)
-
-        Logger.error(%{
-          "host" => s.host,
-          "port" => s.port,
-          "reason" => reason,
-          "msg" => "disconnect"
-        })
+        Logger.error("socket closed, host: #{host}, port: #{port}, reason: #{reason}")
     end
 
     {:connect, :reconnect, %{s | sock: nil}}
@@ -230,13 +197,8 @@ defmodule ExRocketmq.Transport.Tcp do
         {:reply, error, s}
 
       {:error, reason} = error ->
-        Logger.error(%{
-          "reason" => reason,
-          "host" => s.host,
-          "port" => s.port,
-          "msg" => "recv error"
-        })
-
+        reason = :inet.format_error(reason)
+        Logger.error("recv error: #{reason}, host: #{s.host}, port: #{s.port}")
         {:disconnect, error, error, s}
     end
   end
@@ -261,27 +223,18 @@ defmodule ExRocketmq.Transport.Tcp do
   end
 
   @impl Connection
-  def terminate(reason, s) do
-    Logger.warning(%{"msg" => "terminate", "host" => s.host, "port" => s.port, "reason" => reason})
+  def terminate(reason, %{sock: sock}) do
+    Logger.warning("tcp terminated with reason: #{inspect(reason)}")
+
+    sock
+    |> is_nil()
+    |> unless do
+      :gen_tcp.close(sock)
+    end
   end
 
   @spec send_with_retry(any(), binary(), non_neg_integer()) :: :ok | {:error, any()}
-  defp send_with_retry(%{sock: sock} = s, data, 0) do
-    case :gen_tcp.send(sock, data) do
-      :ok ->
-        :ok
-
-      {:error, reason} = error ->
-        Logger.error(%{
-          "reason" => reason,
-          "host" => s.host,
-          "port" => s.port,
-          "msg" => "send error"
-        })
-
-        error
-    end
-  end
+  defp send_with_retry(_s, _data, 0), do: {:error, :retry_exceeded}
 
   defp send_with_retry(%{sock: sock} = s, data, retry) do
     case :gen_tcp.send(sock, data) do
@@ -289,13 +242,8 @@ defmodule ExRocketmq.Transport.Tcp do
         :ok
 
       {:error, reason} ->
-        Logger.warning(%{
-          "reason" => reason,
-          "host" => s.host,
-          "port" => s.port,
-          "msg" => "send error, retrying"
-        })
-
+        reason = :inet.format_error(reason)
+        Logger.error("send error: #{reason}, host: #{s.host}, port: #{s.port}, retrying")
         send_with_retry(s, data, retry - 1)
     end
   end

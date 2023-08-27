@@ -6,12 +6,7 @@ defmodule ExRocketmq.Util.UniqId do
   defmodule State do
     @moduledoc false
 
-    defstruct [
-      :counter,
-      :begin_ts,
-      :next_ts,
-      :prefix
-    ]
+    defstruct counter: 0, begin_ts: 0, next_ts: 0, prefix: ""
   end
 
   use Agent
@@ -33,12 +28,17 @@ defmodule ExRocketmq.Util.UniqId do
       fn %{prefix: prefix, counter: counter, begin_ts: begin} ->
         gap = :os.system_time(:second) - begin
 
-        (prefix <> <<gap * 1000::big-integer-size(32), counter::big-integer-size(16)>>)
-        |> Base.encode16(case: :upper)
+        [
+          prefix,
+          <<gap * 1000::big-integer-size(32), counter::big-integer-size(16)>>
+          |> Base.encode16(case: :upper)
+        ]
+        |> IO.iodata_to_binary()
       end
     )
   end
 
+  @spec start_link(Keyword.t()) :: Agent.on_start()
   def start_link(opts \\ []) do
     with pid <- get_pid(),
          {ip1, ip2, ip3, ip4} <- ExRocketmq.Util.Network.get_local_ipv4_address(),
@@ -57,6 +57,8 @@ defmodule ExRocketmq.Util.UniqId do
              opts
            )
   end
+
+  def stop(pid), do: Agent.stop(pid)
 
   @spec get_pid() :: non_neg_integer()
   defp get_pid() do

@@ -10,19 +10,17 @@ defmodule ExRocketmq.Models.PullMsg do
 
     @behaviour ExtFields
 
-    defstruct [
-      :consumer_group,
-      :topic,
-      :queue_id,
-      :queue_offset,
-      :max_msg_nums,
-      :sys_flag,
-      :commit_offset,
-      :suspend_timeout_millis,
-      :sub_expression,
-      :sub_version,
-      :expression_type
-    ]
+    defstruct consumer_group: "",
+              topic: "",
+              queue_id: 0,
+              queue_offset: 0,
+              max_msg_nums: 0,
+              sys_flag: 0,
+              commit_offset: 0,
+              suspend_timeout_millis: 0,
+              sub_expression: "",
+              sub_version: 0,
+              expression_type: ""
 
     @type t :: %__MODULE__{
             consumer_group: String.t(),
@@ -71,15 +69,13 @@ defmodule ExRocketmq.Models.PullMsg do
     require Response
     require PullStatus
 
-    defstruct [
-      :next_begin_offset,
-      :min_offset,
-      :max_offset,
-      :status,
-      :suggest_which_broker_id,
-      :body,
-      :messages
-    ]
+    defstruct next_begin_offset: 0,
+              min_offset: 0,
+              max_offset: 0,
+              status: 0,
+              suggest_which_broker_id: 0,
+              body: "",
+              messages: []
 
     @type t :: %__MODULE__{
             next_begin_offset: non_neg_integer(),

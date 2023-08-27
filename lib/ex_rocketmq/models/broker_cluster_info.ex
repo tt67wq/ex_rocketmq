@@ -20,7 +20,7 @@ defmodule ExRocketmq.Models.BrokerClusterInfo do
           cluster_addr_table: map()
         }
 
-  defstruct [:broker_addr_table, :cluster_addr_table]
+  defstruct broker_addr_table: %{}, cluster_addr_table: %{}
 
   @spec from_json(String.t()) :: t()
   def from_json(json) do

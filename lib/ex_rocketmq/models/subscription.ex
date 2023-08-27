@@ -3,15 +3,13 @@ defmodule ExRocketmq.Models.Subscription do
   subscription data model
   """
 
-  defstruct [
-    :class_filter_mode,
-    :topic,
-    :sub_string,
-    :tags_set,
-    :code_set,
-    :sub_version,
-    :expression_type
-  ]
+  defstruct class_filter_mode: false,
+            topic: "",
+            sub_string: "",
+            tags_set: MapSet.new(),
+            code_set: MapSet.new(),
+            sub_version: 0,
+            expression_type: ""
 
   @type t :: %__MODULE__{
           class_filter_mode: boolean(),

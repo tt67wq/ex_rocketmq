@@ -7,15 +7,13 @@ defmodule ExRocketmq.Models.EndTransaction do
 
   @behaviour ExtFields
 
-  defstruct [
-    :producer_group,
-    :tran_state_table_offset,
-    :commit_log_offset,
-    :commit_or_rollback,
-    :from_transaction_check,
-    :msg_id,
-    :transaction_id
-  ]
+  defstruct producer_group: "",
+            tran_state_table_offset: 0,
+            commit_log_offset: 0,
+            commit_or_rollback: 0,
+            from_transaction_check: false,
+            msg_id: "",
+            transaction_id: ""
 
   @type t :: %__MODULE__{
           producer_group: String.t(),

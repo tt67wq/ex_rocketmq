@@ -7,11 +7,9 @@ defmodule ExRocketmq.Models.QueryConsumerOffset do
 
   @behaviour ExtFields
 
-  defstruct [
-    :consumer_group,
-    :topic,
-    :queue_id
-  ]
+  defstruct consumer_group: "",
+            topic: "",
+            queue_id: 0
 
   @type t :: %__MODULE__{
           consumer_group: String.t(),
@@ -38,11 +36,9 @@ defmodule ExRocketmq.Models.SearchOffset do
 
   @behaviour ExtFields
 
-  defstruct [
-    :topic,
-    :queue_id,
-    :timestamp
-  ]
+  defstruct topic: "",
+            queue_id: 0,
+            timestamp: 0
 
   @type t :: %__MODULE__{
           topic: String.t(),
@@ -68,10 +64,8 @@ defmodule ExRocketmq.Models.GetMaxOffset do
 
   @behaviour ExtFields
 
-  defstruct [
-    :topic,
-    :queue_id
-  ]
+  defstruct topic: "",
+            queue_id: 0
 
   @type t :: %__MODULE__{
           topic: String.t(),

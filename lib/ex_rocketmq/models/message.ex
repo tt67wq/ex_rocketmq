@@ -4,16 +4,14 @@ defmodule ExRocketmq.Models.Message do
   """
   alias ExRocketmq.{Typespecs}
 
-  defstruct [
-    :topic,
-    :body,
-    :flag,
-    :transaction_id,
-    :batch,
-    :compress,
-    :properties,
-    :queue_id
-  ]
+  defstruct topic: "",
+            body: "",
+            flag: 0,
+            transaction_id: "",
+            batch: false,
+            compress: false,
+            properties: %{},
+            queue_id: 0
 
   @type t :: %__MODULE__{
           topic: String.t(),
@@ -48,8 +46,10 @@ defmodule ExRocketmq.Models.Message do
   end
 
   @spec encode_properties(t()) :: binary()
-  def encode_properties(msg) do
-    msg.properties
+  def encode_properties(%{properties: nil}), do: ""
+
+  def encode_properties(%{properties: properties}) do
+    properties
     |> Enum.map(fn {k, v} -> [k, @property_kv_sep, v, @property_sep] |> IO.iodata_to_binary() end)
     |> IO.iodata_to_binary()
   end
@@ -95,22 +95,20 @@ defmodule ExRocketmq.Models.MessageExt do
   @flag_compressed Flag.flag_compressed()
   @property_unique_client_msgid_key Properties.property_unique_client_msgid_key()
 
-  defstruct [
-    :message,
-    :msg_id,
-    :offset_msg_id,
-    :store_size,
-    :queue_offset,
-    :sys_flag,
-    :born_timestamp,
-    :born_host,
-    :store_timestamp,
-    :store_host,
-    :commit_log_offset,
-    :body_crc,
-    :reconsume_times,
-    :prepared_transaction_offset
-  ]
+  defstruct message: %Message{},
+            msg_id: "",
+            offset_msg_id: "",
+            store_size: 0,
+            queue_offset: 0,
+            sys_flag: 0,
+            born_timestamp: 0,
+            born_host: "",
+            store_timestamp: 0,
+            store_host: "",
+            commit_log_offset: 0,
+            body_crc: 0,
+            reconsume_times: 0,
+            prepared_transaction_offset: 0
 
   @type t :: %__MODULE__{
           message: Message.t(),

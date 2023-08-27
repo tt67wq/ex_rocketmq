@@ -3,6 +3,14 @@ defmodule ExRocketmq.Util.Network do
   network tools
   """
 
+  @spec parse_addr(String.t()) :: {String.t(), non_neg_integer()}
+  def parse_addr(addr) do
+    case String.split(addr, ":") do
+      [host, port] -> {host, String.to_integer(port)}
+      _ -> raise "invalid addr: #{inspect(addr)}"
+    end
+  end
+
   @spec get_local_ipv4_address() :: :socket.in_addr()
   def get_local_ipv4_address do
     # 获取本地 IP 地址列表

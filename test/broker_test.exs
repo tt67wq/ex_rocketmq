@@ -18,7 +18,7 @@ defmodule BrokerTest do
 
     opts = [
       broker_name: "test_broker",
-      remote: [transport: Transport.Tcp.new(host: host, port: port)]
+      remote_opts: [transport: Transport.Tcp.new(host: host, port: port)]
     ]
 
     pid = start_supervised!({Broker, opts})

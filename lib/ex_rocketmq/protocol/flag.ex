@@ -6,5 +6,6 @@ defmodule ExRocketmq.Protocol.Flag do
   import ExRocketmq.Util.Const
 
   const :flag_compressed, 0x1
+  const :flag_transaction_prepared, Bitwise.bsl(0x1, 2)
   const :flag_born_host_v6, Bitwise.bsl(0x1, 4)
 end

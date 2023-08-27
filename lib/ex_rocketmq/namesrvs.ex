@@ -17,6 +17,7 @@ defmodule ExRocketmq.Namesrvs do
   require Packet
   require Request
   require Response
+  require Logger
 
   # request constants
   @req_get_routeinfo_by_topic Request.req_get_routeinfo_by_topic()
@@ -24,9 +25,6 @@ defmodule ExRocketmq.Namesrvs do
 
   # response constants
   @resp_success Response.resp_success()
-  # @resp_error Response.resp_error()
-
-  # import ExRocketmq.Util.Debug
 
   @namesrvs_opts_schema [
     remotes: [
@@ -79,7 +77,7 @@ defmodule ExRocketmq.Namesrvs do
          ]
        }}
   """
-  @spec query_topic_route_info(pid(), String.t()) ::
+  @spec query_topic_route_info(namesrvs :: pid() | atom(), topic :: String.t()) ::
           Typespecs.ok_t(Models.TopicRouteInfo.t()) | Typespecs.error_t()
   def query_topic_route_info(namesrvs, topic) do
     with {:ok, msg} <-
@@ -121,7 +119,7 @@ defmodule ExRocketmq.Namesrvs do
           cluster_addr_table: %{"d2" => ["sts-broker-d2-0"]}
       }}
   """
-  @spec get_broker_cluster_info(pid()) ::
+  @spec get_broker_cluster_info(pid() | atom()) ::
           Typespecs.ok_t(Models.BrokerClusterInfo.t()) | Typespecs.error_t()
   def get_broker_cluster_info(namesrvs) do
     with {:ok, msg} <-
@@ -172,6 +170,9 @@ defmodule ExRocketmq.Namesrvs do
     end
   end
 
+  @spec stop(pid() | atom()) :: :ok
+  def stop(namesrvs), do: GenServer.stop(namesrvs)
+
   # -------- server -------
 
   def init(remotes: remotes) do
@@ -205,5 +206,12 @@ defmodule ExRocketmq.Namesrvs do
       |> Remote.rpc(pkt)
 
     {:reply, reply, %{state | opaque: opaque + 1, index: rem(index + 1, size)}}
+  end
+
+  def terminate(reason, %{remotes: remotes}) do
+    Logger.warning("namesrvs terminated with reason: #{inspect(reason)}")
+
+    remotes
+    |> Enum.each(&Remote.stop/1)
   end
 end

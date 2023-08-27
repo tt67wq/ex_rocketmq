@@ -6,11 +6,9 @@ defmodule ExRocketmq.Models.Lock do
 
     alias ExRocketmq.Models.{MessageQueue}
 
-    defstruct [
-      :consumer_group,
-      :client_id,
-      :mq
-    ]
+    defstruct consumer_group: "",
+              client_id: "",
+              mq: MapSet.new()
 
     @type t :: %__MODULE__{
             consumer_group: String.t(),

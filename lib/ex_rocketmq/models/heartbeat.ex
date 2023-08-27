@@ -3,11 +3,9 @@ defmodule ExRocketmq.Models.Heartbeat do
   heartbeat data send to broker
   """
 
-  defstruct [
-    :client_id,
-    :producer_data_set,
-    :consumer_data_set
-  ]
+  defstruct client_id: "",
+            producer_data_set: MapSet.new(),
+            consumer_data_set: MapSet.new()
 
   @type t :: %__MODULE__{
           client_id: String.t(),
@@ -37,9 +35,7 @@ end
 defmodule ExRocketmq.Models.ProducerData do
   @moduledoc false
 
-  defstruct [
-    :group
-  ]
+  defstruct group: ""
 
   @type t :: %__MODULE__{
           group: String.t()

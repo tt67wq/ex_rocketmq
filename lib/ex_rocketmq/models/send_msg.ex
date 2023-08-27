@@ -22,40 +22,25 @@ defmodule ExRocketmq.Models.SendMsg do
             unit_mode: boolean(),
             max_reconsume_times: non_neg_integer(),
             batch: boolean(),
+            reply: boolean(),
             default_topic: String.t(),
             default_topic_queue_num: non_neg_integer()
           }
 
-    defstruct [
-      :producer_group,
-      :topic,
-      :queue_id,
-      :sys_flag,
-      :born_timestamp,
-      :flag,
-      :properties,
-      :reconsume_times,
-      :unit_mode,
-      :max_reconsume_times,
-      :batch,
-      :default_topic,
-      :default_topic_queue_num
-    ]
-
-    @compress_flag 0x1
-    @transaction_prepared_flag 0x100
-
-    @spec set_compress_flag(non_neg_integer()) :: non_neg_integer()
-    def set_compress_flag(flag) do
-      flag
-      |> Bitwise.|||(@compress_flag)
-    end
-
-    @spec set_transaction_prepared_flag(non_neg_integer()) :: non_neg_integer()
-    def set_transaction_prepared_flag(flag) do
-      flag
-      |> Bitwise.|||(@transaction_prepared_flag)
-    end
+    defstruct producer_group: "",
+              topic: "",
+              queue_id: 0,
+              sys_flag: 0,
+              born_timestamp: 0,
+              flag: 0,
+              properties: "",
+              reconsume_times: 0,
+              unit_mode: false,
+              max_reconsume_times: 0,
+              batch: false,
+              reply: false,
+              default_topic: "",
+              default_topic_queue_num: 0
 
     @impl ExtFields
     def to_map(%{batch: true} = t) do
@@ -115,16 +100,14 @@ defmodule ExRocketmq.Models.SendMsg do
             trace_on: boolean()
           }
 
-    defstruct [
-      :status,
-      :msg_id,
-      :queue,
-      :queue_offset,
-      :transaction_id,
-      :offset_msg_id,
-      :region_id,
-      :trace_on
-    ]
+    defstruct status: 0,
+              msg_id: "",
+              queue: %ExRocketmq.Models.MessageQueue{},
+              queue_offset: 0,
+              transaction_id: "",
+              offset_msg_id: "",
+              region_id: "",
+              trace_on: false
 
     @send_result_map %{
       Protocol.Response.res_flush_disk_timeout() => Protocol.SendStatus.send_flush_disk_timeout(),

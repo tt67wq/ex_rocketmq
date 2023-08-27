@@ -8,7 +8,8 @@ defmodule ExRocketmq.Producer.Selector do
   @type t :: struct()
 
   @callback new(Typespecs.opts()) :: t()
-  @callback start_link(selector: t()) :: Typespecs.on_start()
+  @callback start(t()) :: t()
+  @callback stop(t()) :: :ok
 
   @callback select(t(), Models.Message.t(), [Models.MessageQueue.t()]) :: Models.MessageQueue.t()
 
@@ -18,10 +19,11 @@ defmodule ExRocketmq.Producer.Selector do
   @spec select(t(), Models.Message.t(), [Models.MessageQueue.t()]) :: Models.MessageQueue.t()
   def select(m, msg, queues), do: delegate(m, :select, [msg, queues])
 
-  @spec start_link(t()) :: Typespecs.on_start()
-  def start_link(%module{} = m) do
-    apply(module, :start_link, [[selector: m]])
-  end
+  @spec start(t()) :: t()
+  def start(m), do: delegate(m, :start, [])
+
+  @spec stop(t()) :: :ok
+  def stop(m), do: delegate(m, :stop, [])
 end
 
 defmodule ExRocketmq.Producer.Selector.Random do
@@ -29,24 +31,16 @@ defmodule ExRocketmq.Producer.Selector.Random do
   select from queue list randomly
   """
 
-  alias ExRocketmq.{Typespecs}
-
   @behaviour ExRocketmq.Producer.Selector
 
-  defstruct [:name]
+  defstruct []
 
-  @type t :: %__MODULE__{
-          name: Typespecs.name()
-        }
+  @type t :: %__MODULE__{}
 
-  def new(opts \\ []) do
-    opts = opts |> Keyword.put_new(:name, :random)
-    struct(__MODULE__, opts)
-  end
+  def new(_opts), do: %__MODULE__{}
 
-  def start_link(selector: m) do
-    Agent.start_link(fn -> m end, name: m.name)
-  end
+  def start(t), do: t
+  def stop(_), do: :ok
 
   def select(_, _msg, mq_list) do
     mq_list
@@ -59,27 +53,29 @@ defmodule ExRocketmq.Producer.Selector.RoundRobin do
   select from queue list by round robin
   """
 
-  alias ExRocketmq.{Typespecs}
-
   @behaviour ExRocketmq.Producer.Selector
 
-  defstruct [:name]
+  defstruct [:pid]
 
   @type t :: %__MODULE__{
-          name: Typespecs.name()
+          pid: pid()
         }
 
   def new(opts \\ []) do
-    opts = opts |> Keyword.put_new(:name, :round_robin)
     struct(__MODULE__, opts)
   end
 
-  def start_link(selector: m) do
-    Agent.start_link(fn -> 0 end, name: m.name)
+  def start(m) do
+    {:ok, pid} = Agent.start_link(fn -> 0 end)
+    %{m | pid: pid}
+  end
+
+  def stop(t) do
+    Agent.stop(t.pid)
   end
 
   def select(m, _, mq_list) do
-    Agent.get_and_update(m.name, fn current ->
+    Agent.get_and_update(m.pid, fn current ->
       {Enum.at(mq_list, current), (current + 1) |> rem(Enum.count(mq_list))}
     end)
   end

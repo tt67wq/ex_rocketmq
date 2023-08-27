@@ -10,14 +10,16 @@ defmodule ExRocketmq.Broker do
       :broker_name,
       :remote,
       :opaque,
-      :version
+      :version,
+      :controlling_process
     ]
 
     @type t :: %__MODULE__{
             broker_name: String.t(),
             remote: pid(),
             opaque: non_neg_integer(),
-            version: non_neg_integer()
+            version: non_neg_integer(),
+            controlling_process: pid()
           }
   end
 
@@ -49,19 +51,28 @@ defmodule ExRocketmq.Broker do
 
   use GenServer
 
+  # req
   @req_send_message Request.req_send_message()
+  @req_send_batch_message Request.req_send_batch_message()
+  @req_send_reply_message Request.req_send_reply_message()
   @req_query_consumer_offset Request.req_query_consumer_offset()
   @req_update_consumer_offset Request.req_update_consumer_offset()
   @req_search_offset_by_timestamp Request.req_search_offset_by_timestamp()
   @req_get_max_offset Request.req_get_max_offset()
   @req_pull_message Request.req_pull_message()
   @req_hearbeat Request.req_heartbeat()
-  @resp_success Response.resp_success()
   @req_consumer_send_msg_back Request.req_consumer_send_msg_back()
   @req_end_transaction Request.req_end_transaction()
   @req_get_consumer_list_by_group Request.req_get_consumer_list_by_group()
   @req_lock_batch_mq Request.req_lock_batch_mq()
   @req_unlock_batch_mq Request.req_unlock_batch_mq()
+
+  # resp
+  @resp_success Response.resp_success()
+  @resp_error Response.resp_error()
+  @resp_topic_not_exist Response.resp_topic_not_exist()
+  @resp_service_not_available Response.res_service_not_available()
+  @resp_no_permission Response.res_no_permission()
 
   @broker_opts_schema [
     broker_name: [
@@ -69,10 +80,10 @@ defmodule ExRocketmq.Broker do
       required: true,
       doc: "The name of the broker"
     ],
-    remote: [
+    remote_opts: [
       type: :any,
       required: true,
-      doc: "The remote instances of the broker"
+      doc: "The remote options of the broker, see ExRocketmq.Remote for details"
     ],
     opts: [
       type: :keyword_list,
@@ -93,6 +104,12 @@ defmodule ExRocketmq.Broker do
     GenServer.start_link(__MODULE__, init, opts)
   end
 
+  @spec stop(pid()) :: :ok
+  def stop(broker), do: GenServer.stop(broker)
+
+  @spec controlling_process(pid(), pid()) :: :ok
+  def controlling_process(broker, pid), do: GenServer.cast(broker, {:controlling_process, pid})
+
   @spec heartbeat(pid(), Heartbeat.t()) :: :ok | Typespecs.error_t()
   def heartbeat(broker, heartbeat) do
     with {:ok, body} <- Heartbeat.encode(heartbeat),
@@ -111,15 +128,55 @@ defmodule ExRocketmq.Broker do
     end
   end
 
+  @spec send_msg_code(SendMsg.Request.t()) :: non_neg_integer()
+  defp send_msg_code(%{reply: true}), do: @req_send_reply_message
+  defp send_msg_code(%{batch: true}), do: @req_send_batch_message
+  defp send_msg_code(_), do: @req_send_message
+
   @spec sync_send_message(pid(), SendMsg.Request.t(), binary()) ::
           {:ok, SendMsg.Response.t()} | Typespecs.error_t()
   def sync_send_message(broker, req, body) do
     with ext_fields <- ExtFields.to_map(req),
-         {:ok, pkt} <-
-           GenServer.call(broker, {:rpc, @req_send_message, body, ext_fields}, 10_000),
+         code <- send_msg_code(req),
+         {:ok, pkt} <- send_with_retry(broker, code, body, ext_fields, 3),
          {:ok, resp} <- SendMsg.Response.from_pkt(pkt) do
       q = %{resp.queue | topic: req.topic, broker_name: GenServer.call(broker, :broker_name)}
       {:ok, %{resp | queue: q}}
+    end
+  end
+
+  @spec send_with_retry(
+          pid(),
+          Typespecs.req_code(),
+          binary(),
+          Typespecs.ext_fields(),
+          non_neg_integer()
+        ) ::
+          {:ok, Packet.t()} | Typespecs.error_t()
+  defp send_with_retry(_, _, _, _, 0), do: {:error, :retry_times_exceeded}
+
+  defp send_with_retry(broker, code, body, ext_fields, retry_times) do
+    case GenServer.call(broker, {:rpc, code, body, ext_fields}, 5_000) do
+      {:ok, pkt} ->
+        Packet.packet(pkt, :code)
+        |> Kernel.in([
+          @resp_error,
+          @resp_topic_not_exist,
+          @resp_service_not_available,
+          @resp_no_permission
+        ])
+        |> if do
+          Logger.warning(
+            "send message failed, code: #{Packet.packet(pkt, :code)}, remark: #{Packet.packet(pkt, :remark)},  retrying..."
+          )
+
+          send_with_retry(broker, code, body, ext_fields, retry_times - 1)
+        else
+          {:ok, pkt}
+        end
+
+      {:error, _} = error ->
+        error
     end
   end
 
@@ -133,8 +190,9 @@ defmodule ExRocketmq.Broker do
   @spec one_way_send_message(pid(), SendMsg.Request.t(), binary()) ::
           :ok
   def one_way_send_message(broker, req, body) do
-    with ext_fields <- ExtFields.to_map(req) do
-      GenServer.cast(broker, {:one_way, @req_send_message, body, ext_fields})
+    with ext_fields <- ExtFields.to_map(req),
+         code <- send_msg_code(req) do
+      GenServer.cast(broker, {:one_way, code, body, ext_fields})
     end
   end
 
@@ -251,9 +309,16 @@ defmodule ExRocketmq.Broker do
   # ------- server ------
 
   def init(opts) do
-    {:ok, remote_pid} = Remote.start_link(opts[:remote])
+    {:ok, remote_pid} = Remote.start_link(opts[:remote_opts])
 
-    {:ok, %State{broker_name: opts[:broker_name], remote: remote_pid, opaque: 0, version: 0}}
+    {:ok,
+     %State{
+       broker_name: opts[:broker_name],
+       remote: remote_pid,
+       opaque: 0,
+       version: 0,
+       controlling_process: nil
+     }}
   end
 
   def handle_call(
@@ -279,6 +344,10 @@ defmodule ExRocketmq.Broker do
   def handle_call(:broker_name, _, %{broker_name: broker_name} = state),
     do: {:reply, broker_name, state}
 
+  def handle_cast({:controlling_process, pid}, state) do
+    {:noreply, %{state | controlling_process: pid}}
+  end
+
   def handle_cast({:set_version, version}, %{version: old_version} = state) do
     if version != old_version do
       Logger.info("Broker version changed from #{old_version} to #{version}")
@@ -300,5 +369,28 @@ defmodule ExRocketmq.Broker do
     |> Remote.one_way(pkt)
 
     {:noreply, state}
+  end
+
+  def handle_info(:pop_notify, %{controlling_process: nil} = state) do
+    Process.send_after(self(), :pop_notify, 5000)
+    {:noreply, state}
+  end
+
+  def handle_info(:pop_notify, %{remote: remote, controlling_process: cpid} = state) do
+    case Remote.pop_notify(remote) do
+      :empty ->
+        nil
+
+      pkt ->
+        send(cpid, {:notify, pkt})
+    end
+
+    Process.send_after(self(), :pop_notify, 1000)
+    {:noreply, state}
+  end
+
+  def terminate(reason, %{remote: remote}) do
+    Logger.warning("broker terminated with reason: #{inspect(reason)}")
+    Remote.stop(remote)
   end
 end

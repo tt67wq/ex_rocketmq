@@ -5,6 +5,7 @@ defmodule ExRocketmq.Util.Queue do
 
   use Agent
 
+  @spec start_link(opts :: Keyword.t()) :: Agent.on_start()
   def start_link(opts \\ []) do
     Agent.start_link(fn -> :queue.new() end, opts)
   end
@@ -25,4 +26,7 @@ defmodule ExRocketmq.Util.Queue do
       end
     end)
   end
+
+  @spec stop(pid()) :: :ok
+  def stop(agent), do: Agent.stop(agent)
 end
