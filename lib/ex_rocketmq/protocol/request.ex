@@ -14,6 +14,8 @@ defmodule ExRocketmq.Protocol.Request do
   const :req_consumer_send_msg_back, 36
   const :req_end_transaction, 37
   const :req_get_consumer_list_by_group, 38
+  const :req_check_transaction_state, 39
+  const :req_notify_consumer_ids_changed, 40
   const :req_lock_batch_mq, 41
   const :req_unlock_batch_mq, 42
   const :req_get_routeinfo_by_topic, 105
