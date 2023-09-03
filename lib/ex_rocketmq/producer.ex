@@ -19,7 +19,8 @@ defmodule ExRocketmq.Producer do
               Typespecs.topic() => {list(Models.BrokerData.t()), list(Models.MessageQueue.t())}
             },
             selector: struct(),
-            compress: keyword()
+            compress: keyword(),
+            transaction_listener: ExRocketmq.Producer.Transaction.t()
           }
 
     defstruct client_id: "",
@@ -30,7 +31,8 @@ defmodule ExRocketmq.Producer do
               uniqid: nil,
               publish_info_map: %{},
               selector: nil,
-              compress: nil
+              compress: nil,
+              transaction_listener: ExRocketmq.Producer.MockTransaction.new()
   end
 
   alias ExRocketmq.{
@@ -50,19 +52,27 @@ defmodule ExRocketmq.Producer do
     BrokerData,
     SendMsg,
     Heartbeat,
-    ProducerData
+    ProducerData,
+    MessageId,
+    EndTransaction
   }
 
   alias ExRocketmq.Protocol.{
     Properties,
-    Flag
+    Flag,
+    Response,
+    Transaction
   }
 
   require Logger
   require Properties
   require Flag
+  require Response
+  require Transaction
 
   use GenServer
+
+  import ExRocketmq.Util.Assertion
 
   @producer_opts_schema [
     group_name: [
@@ -106,6 +116,11 @@ defmodule ExRocketmq.Producer do
         ]
       ]
     ],
+    transaction_listener: [
+      type: :any,
+      doc: "The transaction listener of the producer",
+      default: ExRocketmq.Producer.MockTransaction.new()
+    ],
     opts: [
       type: :keyword_list,
       default: [],
@@ -116,11 +131,26 @@ defmodule ExRocketmq.Producer do
   # properties
   @property_unique_client_msgid_key Properties.property_unique_client_msgid_key()
   @property_transaction_prepared Properties.property_transaction_prepared()
+  @property_producer_group Properties.property_producer_group()
   @property_msg_type Properties.property_msg_type()
 
   # flag
   @flag_compressed Flag.flag_compressed()
   @flag_transaction_prepared Flag.flag_transaction_prepared()
+
+  # resp
+  @resp_success Response.resp_success()
+
+  # transaction
+  @transaction_commit Transaction.commit()
+  @transaction_rollback Transaction.rollback()
+  @transaction_unknown Transaction.unknown()
+
+  # transaction type
+  @transaction_not_type Transaction.not_type()
+  @transaction_prepare_type Transaction.prepare_type()
+  @transaction_commit_type Transaction.commit_type()
+  @transaction_rollback_type Transaction.rollback_type()
 
   @type producer_opts_schema_t :: [unquote(NimbleOptions.option_typespec(@producer_opts_schema))]
   @type publish_map :: %{
@@ -203,7 +233,8 @@ defmodule ExRocketmq.Producer do
        uniqid: uniqid,
        publish_info_map: %{},
        selector: opts[:selector],
-       compress: opts[:compress]
+       compress: opts[:compress],
+       transaction_listener: opts[:transaction_listener]
      }, {:continue, :on_start}}
   end
 
@@ -228,6 +259,64 @@ defmodule ExRocketmq.Producer do
     with {:ok, {broker_pid, req, msg, pmap}} <- prepare_send_msg_request(msgs, state),
          {:ok, resp} <- Broker.sync_send_message(broker_pid, req, msg.body) do
       {:reply, {:ok, resp}, %{state | publish_info_map: pmap}}
+    else
+      {:error, reason} = error ->
+        Logger.error("send message error: #{inspect(reason)}")
+        {:reply, error, state}
+
+      other_reason ->
+        Logger.error("send message error: #{inspect(other_reason)}")
+        {:reply, {:error, :unknown}, state}
+    end
+  end
+
+  def handle_call(
+        {:send_in_transaction, msg},
+        _,
+        %State{
+          group_name: group_name,
+          transaction_listener: tl,
+          registry: registry
+        } = state
+      ) do
+    with msg <- %{
+           msg
+           | properties:
+               Map.merge(msg.properties, %{
+                 @property_transaction_prepared => "true",
+                 @property_producer_group => group_name
+               })
+         },
+         {:ok, {broker_pid, req, msg, pmap}} <- prepare_send_msg_request([msg], state),
+         {:ok, %SendMsg.Response{queue: q} = resp} <-
+           Broker.sync_send_message(broker_pid, req, msg.body),
+         :ok <- do_assert(fn -> resp.status == @resp_success end, %{"status" => resp.status}),
+         {:ok, %MessageId{} = message_id} <- get_msg_id(resp),
+         msg <- %{
+           msg
+           | properties: Map.put(msg.properties, "__transactionId__", resp.transaction_id)
+         },
+         msg <- set_tranaction_id(msg),
+         {:ok, transaction_status} <- ExRocketmq.Producer.Transaction.execute_local(tl, msg),
+         transaction_type <-
+           (fn
+              @transaction_commit -> @transaction_commit_type
+              @transaction_rollback -> @transaction_rollback_type
+              _ -> @transaction_not_type
+            end).(transaction_status),
+         req <- %EndTransaction{
+           producer_group: group_name,
+           tran_state_table_offset: resp.queue_offset,
+           commit_log_offset: message_id.offset,
+           commit_or_rollback: transaction_type,
+           msg_id: resp.msg_id,
+           transaction_id: resp.transaction_id
+         },
+         {:ok, {broker_datas, _mqs}} <- Map.fetch(pmap, msg.topic),
+         {:ok, %BrokerData{} = bd} <- get_broker_data(broker_datas, q),
+         broker_pid <- get_or_new_broker(bd.broker_name, bd.broker_addrs["0"], registry),
+         :ok <- Broker.end_transaction(broker_pid, req) do
+      {:reply, {:ok, message_id}, %{state | publish_info_map: pmap}}
     else
       {:error, reason} = error ->
         Logger.error("send message error: #{inspect(reason)}")
@@ -432,7 +521,7 @@ defmodule ExRocketmq.Producer do
   end
 
   @spec set_uniqid(Message.t(), pid()) :: Message.t()
-  defp set_uniqid(%{batch: false, properties: properties} = msg, uniqid) do
+  defp set_uniqid(%Message{batch: false, properties: properties} = msg, uniqid) do
     case Map.get(properties, @property_unique_client_msgid_key) do
       nil ->
         properties =
@@ -467,20 +556,26 @@ defmodule ExRocketmq.Producer do
   defp compress_sysflag(_, sysflag), do: sysflag
 
   @spec transaction_sysflag(Message.t(), Typespecs.sysflag()) :: Typespecs.sysflag()
-  defp transaction_sysflag(%{properties: %{@property_transaction_prepared => val}}, sysflag) do
-    val
-    |> Util.Bool.boolean?()
-    |> if do
-      Bitwise.bor(sysflag, @flag_transaction_prepared)
-    else
-      sysflag
-    end
-  end
+  defp transaction_sysflag(%{properties: %{@property_transaction_prepared => "true"}}, sysflag),
+    do: Bitwise.bor(sysflag, @flag_transaction_prepared)
 
   defp transaction_sysflag(_, sysflag), do: sysflag
+
+  defp set_tranaction_id(%Message{properties: %{@property_unique_client_msgid_key => key}} = msg)
+       when key not in [nil, ""] do
+    %{msg | transaction_id: key}
+  end
+
+  defp set_tranaction_id(msg), do: msg
 
   @spec all_broker_pids(atom()) :: list(pid())
   defp all_broker_pids(registry) do
     Registry.select(registry, [{{:"$1", :"$2", :"$3"}, [], [:"$2"]}])
   end
+
+  @spec get_msg_id(%SendMsg.Response{}) :: {:ok, MessageId.t()} | {:error, any()}
+  defp get_msg_id(%SendMsg.Response{offset_msg_id: offset_msg_id}) when offset_msg_id != "",
+    do: MessageId.decode(offset_msg_id)
+
+  defp get_msg_id(%SendMsg.Response{msg_id: msg_id}), do: MessageId.decode(msg_id)
 end

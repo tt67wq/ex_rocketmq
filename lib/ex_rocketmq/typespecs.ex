@@ -28,4 +28,5 @@ defmodule ExRocketmq.Typespecs do
   @type transaction_id :: String.t()
   @type properties :: str_dict()
   @type ext_fields :: str_dict()
+  @type transaction_state :: non_neg_integer()
 end
