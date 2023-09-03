@@ -180,13 +180,6 @@ defmodule ExRocketmq.Broker do
     end
   end
 
-  @spec async_send_message(pid(), SendMsg.Request.t(), binary()) :: Task.t()
-  def async_send_message(broker, req, body) do
-    Task.async(fn ->
-      sync_send_message(broker, req, body)
-    end)
-  end
-
   @spec one_way_send_message(pid(), SendMsg.Request.t(), binary()) ::
           :ok
   def one_way_send_message(broker, req, body) do
