@@ -130,9 +130,9 @@ defmodule ExRocketmq.Models.MessageExt do
   @spec decode_from_binary(binary()) :: [t()]
   def decode_from_binary(body), do: decode_one(body, [])
 
-  def decode_one(<<>>, acc), do: acc
+  defp decode_one(<<>>, acc), do: acc
 
-  def decode_one(body, acc) do
+  defp decode_one(body, acc) do
     with <<
            store_size::big-integer-size(32),
            _magic::size(32),

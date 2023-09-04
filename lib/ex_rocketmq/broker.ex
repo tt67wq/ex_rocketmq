@@ -110,6 +110,9 @@ defmodule ExRocketmq.Broker do
   @spec controlling_process(pid(), pid()) :: :ok
   def controlling_process(broker, pid), do: GenServer.cast(broker, {:controlling_process, pid})
 
+  @spec broker_name(pid()) :: String.t()
+  def broker_name(broker), do: GenServer.call(broker, :broker_name)
+
   @spec heartbeat(pid(), Heartbeat.t()) :: :ok | Typespecs.error_t()
   def heartbeat(broker, heartbeat) do
     with {:ok, body} <- Heartbeat.encode(heartbeat),
@@ -311,7 +314,12 @@ defmodule ExRocketmq.Broker do
        opaque: 0,
        version: 0,
        controlling_process: nil
-     }}
+     }, {:continue, :on_start}}
+  end
+
+  def handle_continue(:on_start, state) do
+    Process.send_after(self(), :pop_notify, 1000)
+    {:noreply, state}
   end
 
   def handle_call(
@@ -365,6 +373,7 @@ defmodule ExRocketmq.Broker do
   end
 
   def handle_info(:pop_notify, %{controlling_process: nil} = state) do
+    Logger.warning("controlling process is nil, broker will not notify")
     Process.send_after(self(), :pop_notify, 5000)
     {:noreply, state}
   end
@@ -375,7 +384,7 @@ defmodule ExRocketmq.Broker do
         nil
 
       pkt ->
-        send(cpid, {:notify, pkt})
+        send(cpid, {:notify, {pkt, self()}})
     end
 
     Process.send_after(self(), :pop_notify, 1000)

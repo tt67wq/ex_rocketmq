@@ -42,11 +42,13 @@ defmodule ExRocketmq.Producer do
     Transport,
     Broker,
     Producer.Selector,
-    Compressor
+    Compressor,
+    Remote.Packet
   }
 
   alias ExRocketmq.Models.{
     Message,
+    MessageExt,
     QueueData,
     MessageQueue,
     BrokerData,
@@ -54,12 +56,14 @@ defmodule ExRocketmq.Producer do
     Heartbeat,
     ProducerData,
     MessageId,
-    EndTransaction
+    EndTransaction,
+    CheckTransactionState
   }
 
   alias ExRocketmq.Protocol.{
     Properties,
     Flag,
+    Request,
     Response,
     Transaction
   }
@@ -68,7 +72,9 @@ defmodule ExRocketmq.Producer do
   require Properties
   require Flag
   require Response
+  require Request
   require Transaction
+  require Packet
 
   use GenServer
 
@@ -133,6 +139,7 @@ defmodule ExRocketmq.Producer do
   @property_transaction_prepared Properties.property_transaction_prepared()
   @property_producer_group Properties.property_producer_group()
   @property_msg_type Properties.property_msg_type()
+  @property_transaction_id Properties.property_transaction_id()
 
   # flag
   @flag_compressed Flag.flag_compressed()
@@ -144,13 +151,14 @@ defmodule ExRocketmq.Producer do
   # transaction
   @transaction_commit Transaction.commit()
   @transaction_rollback Transaction.rollback()
-  @transaction_unknown Transaction.unknown()
 
   # transaction type
   @transaction_not_type Transaction.not_type()
-  @transaction_prepare_type Transaction.prepare_type()
   @transaction_commit_type Transaction.commit_type()
   @transaction_rollback_type Transaction.rollback_type()
+
+  # request
+  @req_check_transaction_state Request.req_check_transaction_state()
 
   @type producer_opts_schema_t :: [unquote(NimbleOptions.option_typespec(@producer_opts_schema))]
   @type publish_map :: %{
@@ -209,6 +217,12 @@ defmodule ExRocketmq.Producer do
   @spec send_oneway(pid() | atom(), [Message.t()]) :: :ok
   def send_oneway(producer, msgs) do
     GenServer.cast(producer, {:send_oneway, msgs})
+  end
+
+  @spec send_transaction_msg(pid() | atom(), Message.t()) ::
+          {:ok, MessageId.t()} | Typespecs.error_t()
+  def send_transaction_msg(producer, msgs) do
+    GenServer.call(producer, {:send_in_transaction, msgs}, 10_000)
   end
 
   # -------- server ------
@@ -294,21 +308,15 @@ defmodule ExRocketmq.Producer do
          {:ok, %MessageId{} = message_id} <- get_msg_id(resp),
          msg <- %{
            msg
-           | properties: Map.put(msg.properties, "__transactionId__", resp.transaction_id)
+           | properties: Map.put(msg.properties, @property_transaction_id, resp.transaction_id)
          },
          msg <- set_tranaction_id(msg),
-         {:ok, transaction_status} <- ExRocketmq.Producer.Transaction.execute_local(tl, msg),
-         transaction_type <-
-           (fn
-              @transaction_commit -> @transaction_commit_type
-              @transaction_rollback -> @transaction_rollback_type
-              _ -> @transaction_not_type
-            end).(transaction_status),
+         {:ok, transaction_state} <- ExRocketmq.Producer.Transaction.execute_local(tl, msg),
          req <- %EndTransaction{
            producer_group: group_name,
            tran_state_table_offset: resp.queue_offset,
            commit_log_offset: message_id.offset,
-           commit_or_rollback: transaction_type,
+           commit_or_rollback: transaction_state_to_type(transaction_state),
            msg_id: resp.msg_id,
            transaction_id: resp.transaction_id
          },
@@ -354,8 +362,21 @@ defmodule ExRocketmq.Producer do
     {:noreply, %{state | publish_info_map: pmap}}
   end
 
-  def handle_info({:notify, pkt}, state) do
-    Logger.debug("producer receive notify: #{inspect(pkt)}")
+  def handle_info(
+        {:notify, {pkt, broker_pid}},
+        %State{group_name: group_name, transaction_listener: tl} = state
+      ) do
+    # Logger.warning("producer receive notify: #{inspect(pkt)}")
+
+    case Packet.packet(pkt, :code) do
+      @req_check_transaction_state ->
+        # check transaction state
+        notify_check_transaction_state(pkt, tl, group_name, broker_pid)
+
+      other_code ->
+        Logger.warning("unknown notify code: #{other_code}")
+    end
+
     {:noreply, state}
   end
 
@@ -381,6 +402,34 @@ defmodule ExRocketmq.Producer do
   end
 
   # ------- private funcs ------
+
+  defp notify_check_transaction_state(pkt, transaction_listener, group_name, broker_pid) do
+    with {:ok, header} <- CheckTransactionState.decode(Packet.packet(pkt, :ext_fields)),
+         [msg_ext] <- MessageExt.decode_from_binary(Packet.packet(pkt, :body)),
+         %MessageExt{message: msg} = msg_ext <- %MessageExt{
+           msg_ext
+           | message: set_tranaction_id(msg_ext.message)
+         },
+         uniq_key <- Map.get(msg.properties, @property_unique_client_msgid_key, msg_ext.msg_id),
+         transaction_id <-
+           Map.get(msg.properties, @property_transaction_id, header.transaction_id),
+         {:ok, transaction_state} <-
+           ExRocketmq.Producer.Transaction.check_local(transaction_listener, msg_ext),
+         req <- %EndTransaction{
+           producer_group: group_name,
+           tran_state_table_offset: header.tran_state_table_offset,
+           commit_log_offset: header.commit_log_offset,
+           commit_or_rollback: transaction_state_to_type(transaction_state),
+           from_transaction_check: true,
+           msg_id: uniq_key,
+           transaction_id: transaction_id
+         } do
+      Broker.end_transaction(broker_pid, req)
+    else
+      {:error, reason} -> Logger.error("check transaction state error: #{inspect(reason)}")
+      others -> Logger.error("check transaction state error: #{inspect(others)}")
+    end
+  end
 
   @spec prepare_send_msg_request([Message.t()], State.t()) ::
           {:ok, {pid(), SendMsg.Request.t(), Message.t(), publish_map()}} | {:error, any()}
@@ -495,12 +544,20 @@ defmodule ExRocketmq.Producer do
 
   defp encode_batch([msg]), do: msg
 
-  @spec get_or_new_broker(String.t(), String.t(), atom()) :: pid()
+  @spec get_or_new_broker(String.t(), String.t() | tuple(), atom()) :: pid()
   defp get_or_new_broker(broker_name, addr, registry) do
     Registry.lookup(registry, addr)
     |> case do
       [] ->
-        {host, port} = Util.Network.parse_addr(addr)
+        {host, port} =
+          addr
+          |> is_bitstring()
+          |> if do
+            Util.Network.parse_addr(addr)
+          else
+            # {host, port} tuple
+            addr
+          end
 
         {:ok, pid} =
           [
@@ -561,6 +618,7 @@ defmodule ExRocketmq.Producer do
 
   defp transaction_sysflag(_, sysflag), do: sysflag
 
+  @spec set_tranaction_id(Message.t()) :: Message.t()
   defp set_tranaction_id(%Message{properties: %{@property_unique_client_msgid_key => key}} = msg)
        when key not in [nil, ""] do
     %{msg | transaction_id: key}
@@ -578,4 +636,13 @@ defmodule ExRocketmq.Producer do
     do: MessageId.decode(offset_msg_id)
 
   defp get_msg_id(%SendMsg.Response{msg_id: msg_id}), do: MessageId.decode(msg_id)
+
+  @spec transaction_state_to_type(Typespecs.transaction_state()) :: Typespecs.transaction_type()
+  defp transaction_state_to_type(transaction_state) do
+    (fn
+       @transaction_commit -> @transaction_commit_type
+       @transaction_rollback -> @transaction_rollback_type
+       _ -> @transaction_not_type
+     end).(transaction_state)
+  end
 end

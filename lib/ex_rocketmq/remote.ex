@@ -61,6 +61,17 @@ defmodule ExRocketmq.Remote do
   @spec pop_notify(pid()) :: Packet.t() | :empty
   def pop_notify(remote), do: GenServer.call(remote, :pop_notify)
 
+  @doc """
+  get transport running info
+
+  ## Examples
+
+      iex> ExRocketmq.Remote.transport_info(remote)
+      {:ok, %{host: "some host", port: 1234, pid: #PID<0.123.0>}}
+  """
+  @spec transport_info(pid()) :: {:ok, map()} | {:error, any()}
+  def transport_info(remote), do: GenServer.call(remote, :transport_info)
+
   @spec start_link(remote_opts_schema_t()) :: Typespecs.on_start()
   def start_link(opts) do
     {opts, args} =
@@ -110,6 +121,9 @@ defmodule ExRocketmq.Remote do
     {:noreply, state}
   end
 
+  def handle_call(:transport_info, _, %{transport: transport} = state),
+    do: {:reply, Transport.info(transport), state}
+
   def handle_call(:pop_notify, _from, %{notify: queue} = state),
     do: {:reply, Queue.pop(queue), state}
 
@@ -121,7 +135,12 @@ defmodule ExRocketmq.Remote do
 
   def handle_info(
         :recv,
-        %{transport: transport, serializer: serializer, waiter: waiter, notify: queue} = state
+        %{
+          transport: transport,
+          serializer: serializer,
+          waiter: waiter,
+          notify: queue
+        } = state
       ) do
     with {:ok, data} <- Transport.recv(transport),
          {:ok, pkt} <- Serializer.decode(serializer, data) do

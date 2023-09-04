@@ -72,6 +72,20 @@ defmodule ExRocketmq.Transport.Tcp do
   end
 
   @impl Transport
+  def info(%__MODULE__{
+        pid: pid,
+        host: host,
+        port: port
+      }) do
+    {:ok,
+     %{
+       pid: pid,
+       host: host,
+       port: port
+     }}
+  end
+
+  @impl Transport
   def start(
         %{
           host: host,

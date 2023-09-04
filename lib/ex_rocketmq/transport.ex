@@ -15,6 +15,8 @@ defmodule ExRocketmq.Transport do
   @callback recv(transport :: t()) ::
               {:ok, binary()} | error_t()
 
+  @callback info(t()) :: {:ok, map()} | error_t()
+
   defp delegate(%module{} = m, func, args),
     do: apply(module, func, [m | args])
 
@@ -35,4 +37,10 @@ defmodule ExRocketmq.Transport do
   """
   @spec recv(t()) :: {:ok, binary()} | error_t()
   def recv(transport), do: delegate(transport, :recv, [])
+
+  @doc """
+  get the info of the transport
+  """
+  @spec info(t()) :: {:ok, map()} | error_t()
+  def info(transport), do: delegate(transport, :info, [])
 end

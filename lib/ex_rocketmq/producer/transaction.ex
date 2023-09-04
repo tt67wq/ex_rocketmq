@@ -56,7 +56,7 @@ defmodule ExRocketmq.Producer.MockTransaction do
       "execute local transaction for #{inspect(msg)} in mock transaction implementation"
     )
 
-    {:ok, @transaction_state["commit"]}
+    {:ok, @transaction_state["unknown"]}
   end
 
   def check_local(_, msg) do
