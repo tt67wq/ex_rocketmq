@@ -220,7 +220,7 @@ defmodule ExRocketmq.Producer do
   end
 
   @spec send_transaction_msg(pid() | atom(), Message.t()) ::
-          {:ok, MessageId.t()} | Typespecs.error_t()
+          {:ok, SendMsg.Response.t(), Typespecs.transaction_state()} | Typespecs.error_t()
   def send_transaction_msg(producer, msgs) do
     GenServer.call(producer, {:send_in_transaction, msgs}, 10_000)
   end
@@ -324,7 +324,7 @@ defmodule ExRocketmq.Producer do
          {:ok, %BrokerData{} = bd} <- get_broker_data(broker_datas, q),
          broker_pid <- get_or_new_broker(bd.broker_name, bd.broker_addrs["0"], registry),
          :ok <- Broker.end_transaction(broker_pid, req) do
-      {:reply, {:ok, message_id}, %{state | publish_info_map: pmap}}
+      {:reply, {:ok, resp, transaction_state}, %{state | publish_info_map: pmap}}
     else
       {:error, reason} = error ->
         Logger.error("send message error: #{inspect(reason)}")
