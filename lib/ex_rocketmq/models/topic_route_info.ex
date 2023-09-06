@@ -149,4 +149,22 @@ defmodule ExRocketmq.Models.QueueData do
       []
     end
   end
+
+  @spec to_consume_queues(t(), Typespecs.topic()) :: list(MessageQueue.t())
+  def to_consume_queues(queue, topic) do
+    queue
+    |> readable?()
+    |> if do
+      0..(queue.read_queue_nums - 1)
+      |> Enum.map(fn queue_id ->
+        %MessageQueue{
+          topic: topic,
+          broker_name: queue.broker_name,
+          queue_id: queue_id
+        }
+      end)
+    else
+      []
+    end
+  end
 end

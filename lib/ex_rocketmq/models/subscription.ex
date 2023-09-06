@@ -6,8 +6,8 @@ defmodule ExRocketmq.Models.Subscription do
   defstruct class_filter_mode: false,
             topic: "",
             sub_string: "",
-            tags_set: MapSet.new(),
-            code_set: MapSet.new(),
+            tags_set: [],
+            code_set: [],
             sub_version: 0,
             expression_type: ""
 
@@ -15,8 +15,8 @@ defmodule ExRocketmq.Models.Subscription do
           class_filter_mode: boolean(),
           topic: String.t(),
           sub_string: String.t(),
-          tags_set: MapSet.t(String.t()),
-          code_set: MapSet.t(String.t()),
+          tags_set: list(String.t()),
+          code_set: list(String.t()),
           sub_version: non_neg_integer(),
           expression_type: String.t()
         }
@@ -27,8 +27,8 @@ defmodule ExRocketmq.Models.Subscription do
       "classFilterMode" => t.class_filter_mode,
       "topic" => t.topic,
       "subString" => t.sub_string,
-      "tagsSet" => MapSet.to_list(t.tags_set),
-      "codeSet" => MapSet.to_list(t.code_set),
+      "tagsSet" => t.tags_set,
+      "codeSet" => t.code_set,
       "subVersion" => t.sub_version,
       "expressionType" => t.expression_type
     }

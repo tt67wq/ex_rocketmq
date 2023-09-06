@@ -18,7 +18,7 @@ defmodule ExRocketmq.Producer do
             publish_info_map: %{
               Typespecs.topic() => {list(Models.BrokerData.t()), list(Models.MessageQueue.t())}
             },
-            selector: struct(),
+            selector: ExRocketmq.Producer.MqSelector.t(),
             compress: keyword(),
             transaction_listener: ExRocketmq.Producer.Transaction.t()
           }
@@ -41,7 +41,7 @@ defmodule ExRocketmq.Producer do
     Util,
     Transport,
     Broker,
-    Producer.Selector,
+    Producer.MqSelector,
     Compressor,
     Remote.Packet
   }
@@ -98,7 +98,7 @@ defmodule ExRocketmq.Producer do
     ],
     selector: [
       type: :any,
-      default: Selector.Random.new([]),
+      default: MqSelector.Random.new([]),
       doc: "The mq selector of the producer"
     ],
     compress: [
@@ -343,7 +343,7 @@ defmodule ExRocketmq.Producer do
     end
   end
 
-  def handle_info(:update_route_info, %{publish_info_map: pmap, namesrvs: namesrvs} = state) do
+  def handle_info(:update_route_info, %State{publish_info_map: pmap, namesrvs: namesrvs} = state) do
     pmap =
       pmap
       |> Map.keys()
@@ -382,11 +382,11 @@ defmodule ExRocketmq.Producer do
 
   def handle_info(
         :heartbeat,
-        %{client_id: cid, group_name: group_name, registry: registry} = state
+        %State{client_id: cid, group_name: group_name, registry: registry} = state
       ) do
     heartbeat_data = %Heartbeat{
       client_id: cid,
-      producer_data_set: MapSet.new([%ProducerData{group: group_name}])
+      producer_data_set: [%ProducerData{group: group_name}]
     }
 
     registry
@@ -454,9 +454,9 @@ defmodule ExRocketmq.Producer do
          sysflag <- compress_sysflag(msg, 0),
          sysflag <- transaction_sysflag(msg, sysflag),
          msg_type <- Map.get(msg.properties, @property_msg_type, ""),
-         pmap <- get_or_new_publish_info(pmap, msg.topic, namesrvs),
+         pmap <- update_publish_info(pmap, msg.topic, namesrvs),
          {:ok, {broker_datas, mqs}} <- Map.fetch(pmap, msg.topic),
-         mq <- Selector.select(selector, msg, mqs),
+         mq <- MqSelector.select(selector, msg, mqs),
          req <- %SendMsg.Request{
            producer_group: group_name,
            topic: msg.topic,
@@ -509,8 +509,8 @@ defmodule ExRocketmq.Producer do
     end
   end
 
-  @spec get_or_new_publish_info(publish_map(), Typespecs.topic(), pid() | atom()) :: publish_map()
-  defp get_or_new_publish_info(pmap, topic, namesrvs) do
+  @spec update_publish_info(publish_map(), Typespecs.topic(), pid() | atom()) :: publish_map()
+  defp update_publish_info(pmap, topic, namesrvs) do
     pmap
     |> Map.get(topic)
     |> is_nil()

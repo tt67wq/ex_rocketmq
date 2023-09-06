@@ -8,12 +8,12 @@ defmodule ExRocketmq.Models.Lock do
 
     defstruct consumer_group: "",
               client_id: "",
-              mq: MapSet.new()
+              mq: []
 
     @type t :: %__MODULE__{
             consumer_group: String.t(),
             client_id: String.t(),
-            mq: MapSet.t(MessageQueue.t())
+            mq: list(MessageQueue.t())
           }
 
     @spec to_map(t()) :: %{String.t() => any()}

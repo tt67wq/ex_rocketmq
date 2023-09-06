@@ -30,4 +30,6 @@ defmodule ExRocketmq.Typespecs do
   @type ext_fields :: str_dict()
   @type transaction_state :: non_neg_integer()
   @type transaction_type :: non_neg_integer()
+  @type consumer_model :: :cluster | :broadcast
+  @type consume_from_where :: :last_offset | :first_offset | :timestamp
 end

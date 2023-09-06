@@ -29,32 +29,29 @@ defmodule BrokerTest do
     assert :ok ==
              Broker.heartbeat(broker, %Models.Heartbeat{
                client_id: "test",
-               producer_data_set:
-                 MapSet.new([
-                   %Models.ProducerData{group: "test"}
-                 ]),
-               consumer_data_set:
-                 MapSet.new([
-                   %Models.ConsumerData{
-                     group: group,
-                     consume_type: "CONSUME_ACTIVELY",
-                     message_model: "Clustering",
-                     consume_from_where: "CONSUME_FROM_LAST_OFFSET",
-                     subscription_data_set:
-                       MapSet.new([
-                         %Models.Subscription{
-                           class_filter_mode: true,
-                           topic: topic,
-                           sub_string: "*",
-                           tags_set: MapSet.new([]),
-                           code_set: MapSet.new([]),
-                           sub_version: 0,
-                           expression_type: "TAG"
-                         }
-                       ]),
-                     unit_mode: false
-                   }
-                 ])
+               producer_data_set: [
+                 %Models.ProducerData{group: "test"}
+               ],
+               consumer_data_set: [
+                 %Models.ConsumerData{
+                   group: group,
+                   consume_type: "CONSUME_ACTIVELY",
+                   message_model: "Clustering",
+                   consume_from_where: "CONSUME_FROM_LAST_OFFSET",
+                   subscription_data_set: [
+                     %Models.Subscription{
+                       class_filter_mode: true,
+                       topic: topic,
+                       sub_string: "*",
+                       tags_set: [],
+                       code_set: [],
+                       sub_version: 0,
+                       expression_type: "TAG"
+                     }
+                   ],
+                   unit_mode: false
+                 }
+               ]
              })
   end
 
@@ -239,14 +236,13 @@ defmodule BrokerTest do
     req = %Models.Lock.Req{
       consumer_group: group,
       client_id: "test",
-      mq:
-        MapSet.new([
-          %Models.MessageQueue{
-            topic: topic,
-            broker_name: broker_name,
-            queue_id: 0
-          }
-        ])
+      mq: [
+        %Models.MessageQueue{
+          topic: topic,
+          broker_name: broker_name,
+          queue_id: 0
+        }
+      ]
     }
 
     assert {:ok, _} =

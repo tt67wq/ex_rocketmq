@@ -1,6 +1,6 @@
-defmodule ExRocketmq.Producer.Selector do
+defmodule ExRocketmq.Producer.MqSelector do
   @moduledoc """
-  The selector behaviour of the producer
+  The mq-selector behaviour of the producer
   """
 
   alias ExRocketmq.{Typespecs, Models}
@@ -26,12 +26,12 @@ defmodule ExRocketmq.Producer.Selector do
   def stop(m), do: delegate(m, :stop, [])
 end
 
-defmodule ExRocketmq.Producer.Selector.Random do
+defmodule ExRocketmq.Producer.MqSelector.Random do
   @moduledoc """
   select from queue list randomly
   """
 
-  @behaviour ExRocketmq.Producer.Selector
+  @behaviour ExRocketmq.Producer.MqSelector
 
   defstruct []
 
@@ -53,7 +53,7 @@ defmodule ExRocketmq.Producer.Selector.RoundRobin do
   select from queue list by round robin
   """
 
-  @behaviour ExRocketmq.Producer.Selector
+  @behaviour ExRocketmq.Producer.MqSelector
 
   defstruct [:pid]
 

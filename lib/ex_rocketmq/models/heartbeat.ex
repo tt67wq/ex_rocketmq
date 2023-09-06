@@ -4,13 +4,13 @@ defmodule ExRocketmq.Models.Heartbeat do
   """
 
   defstruct client_id: "",
-            producer_data_set: MapSet.new(),
-            consumer_data_set: MapSet.new()
+            producer_data_set: [],
+            consumer_data_set: []
 
   @type t :: %__MODULE__{
           client_id: String.t(),
-          producer_data_set: MapSet.t(ExRocketmq.Models.ProducerData.t()),
-          consumer_data_set: MapSet.t(ExRocketmq.Models.ConsumerData.t())
+          producer_data_set: list(ExRocketmq.Models.ProducerData.t()),
+          consumer_data_set: list(ExRocketmq.Models.ConsumerData.t())
         }
 
   @spec to_map(t()) :: %{String.t() => any()}
