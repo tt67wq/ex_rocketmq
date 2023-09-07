@@ -12,6 +12,7 @@ defmodule ExRocketmq.Producer do
             client_id: String.t(),
             group_name: String.t(),
             namesrvs: pid() | atom(),
+            task_supervisor: pid(),
             dynamic_supervisor: pid(),
             registry: pid(),
             uniqid: pid(),
@@ -26,6 +27,7 @@ defmodule ExRocketmq.Producer do
     defstruct client_id: "",
               group_name: "",
               namesrvs: nil,
+              task_supervisor: nil,
               dynamic_supervisor: nil,
               registry: nil,
               uniqid: nil,
@@ -236,13 +238,16 @@ defmodule ExRocketmq.Producer do
       )
 
     {:ok, uniqid} = Util.UniqId.start_link()
+    {:ok, task_supervisor} = Task.Supervisor.start_link()
+    {:ok, dynamic_supervisor} = DynamicSupervisor.start_link([])
 
     {:ok,
      %State{
        client_id: Util.ClientId.get(),
        group_name: opts[:group_name],
        namesrvs: opts[:namesrvs],
-       dynamic_supervisor: opts[:dynamic_supervisor],
+       task_supervisor: task_supervisor,
+       dynamic_supervisor: dynamic_supervisor,
        registry: registry,
        uniqid: uniqid,
        publish_info_map: %{},
@@ -252,15 +257,29 @@ defmodule ExRocketmq.Producer do
      }, {:continue, :on_start}}
   end
 
-  def terminate(reason, %{uniqid: uniqid, registry: registry}) do
+  def terminate(reason, %State{
+        uniqid: uniqid,
+        dynamic_supervisor: dynamic_supervisor,
+        task_supervisor: task_supervisor
+      }) do
     Logger.info("producer terminate, reason: #{inspect(reason)}")
 
     # stop uniqid
     Util.UniqId.stop(uniqid)
 
+    # stop all existing tasks
+    Task.Supervisor.children(task_supervisor)
+    |> Enum.each(fn pid ->
+      Task.Supervisor.terminate_child(task_supervisor, pid)
+    end)
+
     # stop all broker
-    all_broker_pids(registry)
-    |> Enum.each(&Broker.stop/1)
+    DynamicSupervisor.which_children(dynamic_supervisor)
+    |> Enum.each(fn {_, pid, _, _} ->
+      DynamicSupervisor.terminate_child(dynamic_supervisor, pid)
+    end)
+
+    DynamicSupervisor.stop(dynamic_supervisor)
   end
 
   def handle_continue(:on_start, state) do
@@ -290,7 +309,8 @@ defmodule ExRocketmq.Producer do
         %State{
           group_name: group_name,
           transaction_listener: tl,
-          registry: registry
+          registry: registry,
+          dynamic_supervisor: dynamic_supervisor
         } = state
       ) do
     with msg <- %{
@@ -322,7 +342,13 @@ defmodule ExRocketmq.Producer do
          },
          {:ok, {broker_datas, _mqs}} <- Map.fetch(pmap, msg.topic),
          {:ok, %BrokerData{} = bd} <- get_broker_data(broker_datas, q),
-         broker_pid <- get_or_new_broker(bd.broker_name, BrokerData.master_addr(bd), registry),
+         broker_pid <-
+           get_or_new_broker(
+             bd.broker_name,
+             BrokerData.master_addr(bd),
+             registry,
+             dynamic_supervisor
+           ),
          :ok <- Broker.end_transaction(broker_pid, req) do
       {:reply, {:ok, resp, transaction_state}, %{state | publish_info_map: pmap}}
     else
@@ -364,14 +390,21 @@ defmodule ExRocketmq.Producer do
 
   def handle_info(
         {:notify, {pkt, broker_pid}},
-        %State{group_name: group_name, transaction_listener: tl} = state
+        %State{
+          group_name: group_name,
+          transaction_listener: tl,
+          task_supervisor: task_supervisor
+        } = state
       ) do
     # Logger.warning("producer receive notify: #{inspect(pkt)}")
 
     case Packet.packet(pkt, :code) do
       @req_check_transaction_state ->
         # check transaction state
-        notify_check_transaction_state(pkt, tl, group_name, broker_pid)
+        Task.Supervisor.start_child(
+          task_supervisor,
+          fn -> notify_check_transaction_state(pkt, tl, group_name, broker_pid) end
+        )
 
       other_code ->
         Logger.warning("unknown notify code: #{other_code}")
@@ -444,7 +477,8 @@ defmodule ExRocketmq.Producer do
          selector: selector,
          registry: registry,
          uniqid: uniqid,
-         compress: compress
+         compress: compress,
+         dynamic_supervisor: dynamic_supervisor
        }) do
     with msg <- encode_batch(msgs),
          msg <- set_uniqid(msg, uniqid),
@@ -478,7 +512,13 @@ defmodule ExRocketmq.Producer do
            default_topic_queue_num: 4
          },
          {:ok, bd} <- get_broker_data(broker_datas, mq),
-         broker_pid <- get_or_new_broker(bd.broker_name, BrokerData.master_addr(bd), registry) do
+         broker_pid <-
+           get_or_new_broker(
+             bd.broker_name,
+             BrokerData.master_addr(bd),
+             registry,
+             dynamic_supervisor
+           ) do
       {:ok, {broker_pid, req, msg, pmap}}
     end
   end
@@ -548,8 +588,8 @@ defmodule ExRocketmq.Producer do
 
   defp encode_batch([msg]), do: msg
 
-  @spec get_or_new_broker(String.t(), String.t(), atom()) :: pid()
-  defp get_or_new_broker(broker_name, addr, registry) do
+  @spec get_or_new_broker(String.t(), String.t(), atom(), pid()) :: pid()
+  defp get_or_new_broker(broker_name, addr, registry, dynamic_supervisor) do
     Registry.lookup(registry, addr)
     |> case do
       [] ->
@@ -557,13 +597,13 @@ defmodule ExRocketmq.Producer do
           addr
           |> Util.Network.parse_addr()
 
-        {:ok, pid} =
-          [
-            broker_name: broker_name,
-            remote_opts: [transport: Transport.Tcp.new(host: host, port: port)],
-            opts: [name: {:via, Registry, {registry, addr}}]
-          ]
-          |> Broker.start_link()
+        broker_opts = [
+          broker_name: broker_name,
+          remote_opts: [transport: Transport.Tcp.new(host: host, port: port)],
+          opts: [name: {:via, Registry, {registry, addr}}]
+        ]
+
+        {:ok, pid} = DynamicSupervisor.start_child(dynamic_supervisor, {Broker, broker_opts})
 
         # bind self to broker, then notify from broker will send to self
         Broker.controlling_process(pid, self())
