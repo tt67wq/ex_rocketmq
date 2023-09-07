@@ -322,7 +322,7 @@ defmodule ExRocketmq.Producer do
          },
          {:ok, {broker_datas, _mqs}} <- Map.fetch(pmap, msg.topic),
          {:ok, %BrokerData{} = bd} <- get_broker_data(broker_datas, q),
-         broker_pid <- get_or_new_broker(bd.broker_name, bd.broker_addrs["0"], registry),
+         broker_pid <- get_or_new_broker(bd.broker_name, BrokerData.master_addr(bd), registry),
          :ok <- Broker.end_transaction(broker_pid, req) do
       {:reply, {:ok, resp, transaction_state}, %{state | publish_info_map: pmap}}
     else
@@ -382,7 +382,11 @@ defmodule ExRocketmq.Producer do
 
   def handle_info(
         :heartbeat,
-        %State{client_id: cid, group_name: group_name, registry: registry} = state
+        %State{
+          client_id: cid,
+          group_name: group_name,
+          registry: registry
+        } = state
       ) do
     heartbeat_data = %Heartbeat{
       client_id: cid,
@@ -474,7 +478,7 @@ defmodule ExRocketmq.Producer do
            default_topic_queue_num: 4
          },
          {:ok, bd} <- get_broker_data(broker_datas, mq),
-         broker_pid <- get_or_new_broker(bd.broker_name, bd.broker_addrs["0"], registry) do
+         broker_pid <- get_or_new_broker(bd.broker_name, BrokerData.master_addr(bd), registry) do
       {:ok, {broker_pid, req, msg, pmap}}
     end
   end
@@ -544,20 +548,14 @@ defmodule ExRocketmq.Producer do
 
   defp encode_batch([msg]), do: msg
 
-  @spec get_or_new_broker(String.t(), String.t() | tuple(), atom()) :: pid()
+  @spec get_or_new_broker(String.t(), String.t(), atom()) :: pid()
   defp get_or_new_broker(broker_name, addr, registry) do
     Registry.lookup(registry, addr)
     |> case do
       [] ->
         {host, port} =
           addr
-          |> is_bitstring()
-          |> if do
-            Util.Network.parse_addr(addr)
-          else
-            # {host, port} tuple
-            addr
-          end
+          |> Util.Network.parse_addr()
 
         {:ok, pid} =
           [

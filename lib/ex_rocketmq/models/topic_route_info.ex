@@ -72,6 +72,12 @@ defmodule ExRocketmq.Models.BrokerData do
       cluster: cluster
     }
   end
+
+  @spec master_addr(t()) :: String.t()
+  def master_addr(%__MODULE__{broker_addrs: %{"0" => addr}}), do: addr
+
+  @spec slave_addr(t()) :: String.t()
+  def slave_addr(%__MODULE__{broker_addrs: %{"1" => addr}}), do: addr
 end
 
 defmodule ExRocketmq.Models.QueueData do

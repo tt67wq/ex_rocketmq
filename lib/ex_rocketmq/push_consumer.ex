@@ -22,7 +22,8 @@ defmodule ExRocketmq.PushConsumer do
             consume_info_map: %{
               Typespecs.topic() => {list(Models.BrokerData.t()), list(Models.MessageQueue.t())}
             },
-            consume_from_where: Typespecs.consume_from_where()
+            consume_from_where: Typespecs.consume_from_where(),
+            balance_strategy: ExRocketmq.Consumer.BalanceStrategy.t()
           }
 
     defstruct client_id: "",
@@ -35,17 +36,25 @@ defmodule ExRocketmq.PushConsumer do
               registry: nil,
               subscriptions: %{},
               processor: nil,
+              # topic => route_info
               consume_info_map: %{},
-              consume_from_where: :last_offset
+              # topic => assigned queues
+              process_info_map: %{},
+              consume_from_where: :last_offset,
+              balance_strategy: nil
   end
 
   use GenServer
+
+  alias ExRocketmq.Models.BrokerData
 
   alias ExRocketmq.{
     Util,
     Typespecs,
     Namesrvs,
-    Broker
+    Broker,
+    Transport,
+    Consumer.BalanceStrategy
   }
 
   alias ExRocketmq.Models.{
@@ -94,6 +103,11 @@ defmodule ExRocketmq.PushConsumer do
       doc: "The processor implemention of the consumer, See ExRocketmq.Consumer.Processor",
       required: true
     ],
+    balance_strategy: [
+      type: :any,
+      doc: "The implemention of ExRocketmq.Consumer.BalanceStrategy",
+      default: ExRocketmq.Consumer.BalanceStrategy.Average.new()
+    ],
     opts: [
       type: :keyword_list,
       default: [],
@@ -115,6 +129,9 @@ defmodule ExRocketmq.PushConsumer do
     {init, opts} = Keyword.pop(opts, :opts)
     GenServer.start_link(__MODULE__, init, opts)
   end
+
+  @spec stop(pid() | atom()) :: :ok
+  def stop(consumer), do: GenServer.stop(consumer)
 
   @spec subscribe(pid() | atom(), Typespecs.topic(), ExRocketmq.Models.MsgSelector.t()) :: :ok
   def subscribe(consumer, topic, msg_selector) do
@@ -143,7 +160,8 @@ defmodule ExRocketmq.PushConsumer do
        registry: registry,
        subscriptions: %{},
        consume_info_map: %{},
-       consume_from_where: opts[:consume_from_where]
+       consume_from_where: opts[:consume_from_where],
+       balance_strategy: opts[:balance_strategy]
      }, {:continue, :on_start}}
   end
 
@@ -245,6 +263,30 @@ defmodule ExRocketmq.PushConsumer do
     {:noreply, state}
   end
 
+  def handle_info(
+        :rebalance,
+        %State{
+          client_id: client_id,
+          group_name: group_name,
+          model: :cluster,
+          consume_info_map: cmap,
+          registry: registry,
+          balance_strategy: strategy
+        } = state
+      ) do
+    cmap
+    |> Map.to_list()
+    |> Enum.map(fn {topic, {broker_datas, mqs}} ->
+      bd = Enum.random(broker_datas)
+      broker = get_or_new_broker(bd.broker_name, BrokerData.slave_addr(bd), registry)
+      {:ok, cids} = Broker.get_consumer_list_by_group(broker, group_name)
+      {topic, cids, Enum.sort_by(mqs, & &1.queue_id)}
+      {:ok, allocated_mqs} = BalanceStrategy.allocate(strategy, client_id, mqs, cids)
+    end)
+
+    {:noreply, state}
+  end
+
   # ---- private functions ----
 
   @spec with_namespace(Typespecs.group_name() | Typespecs.topic(), Typespecs.namespace()) ::
@@ -281,5 +323,32 @@ defmodule ExRocketmq.PushConsumer do
   @spec all_broker_pids(atom()) :: list(pid())
   defp all_broker_pids(registry) do
     Registry.select(registry, [{{:"$1", :"$2", :"$3"}, [], [:"$2"]}])
+  end
+
+  @spec get_or_new_broker(String.t(), String.t(), atom()) :: pid()
+  defp get_or_new_broker(broker_name, addr, registry) do
+    Registry.lookup(registry, addr)
+    |> case do
+      [] ->
+        {host, port} =
+          addr
+          |> Util.Network.parse_addr()
+
+        {:ok, pid} =
+          [
+            broker_name: broker_name,
+            remote_opts: [transport: Transport.Tcp.new(host: host, port: port)],
+            opts: [name: {:via, Registry, {registry, addr}}]
+          ]
+          |> Broker.start_link()
+
+        # bind self to broker, then notify from broker will send to self
+        Broker.controlling_process(pid, self())
+
+        pid
+
+      [{pid, _}] ->
+        pid
+    end
   end
 end
