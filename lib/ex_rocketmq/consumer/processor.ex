@@ -17,3 +17,28 @@ defmodule ExRocketmq.Consumer.Processor do
   @spec process(t(), Typespecs.topic(), [MessageExt.t()]) :: :ok | {:error, term()}
   def process(m, topic, msgs), do: delegate(m, :process, [topic, msgs])
 end
+
+defmodule ExRocketmq.Consumer.MockProcessor do
+  @moduledoc """
+  A mock processor for testing.
+  """
+
+  alias ExRocketmq.{
+    Consumer.Processor,
+    Models.MessageExt
+  }
+
+  @behaviour Processor
+
+  defstruct []
+
+  @type t :: %__MODULE__{}
+
+  @spec process(t(), Typespecs.topic(), [MessageExt.t()]) :: :ok | {:error, term()}
+  def process(_, topic, msgs) do
+    msgs
+    |> Enum.map(fn msg -> IO.puts("#{topic}: #{msg.queue_offset} -- #{msg.message.body}") end)
+
+    :ok
+  end
+end

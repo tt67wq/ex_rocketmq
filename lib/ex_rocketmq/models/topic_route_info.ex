@@ -77,7 +77,13 @@ defmodule ExRocketmq.Models.BrokerData do
   def master_addr(%__MODULE__{broker_addrs: %{"0" => addr}}), do: addr
 
   @spec slave_addr(t()) :: String.t()
-  def slave_addr(%__MODULE__{broker_addrs: %{"1" => addr}}), do: addr
+  def slave_addr(%__MODULE__{broker_addrs: addrs}) do
+    addrs
+    |> Map.to_list()
+    |> Enum.filter(fn {k, _} -> k != "0" end)
+    |> Enum.map(fn {_, v} -> v end)
+    |> Enum.random()
+  end
 end
 
 defmodule ExRocketmq.Models.QueueData do

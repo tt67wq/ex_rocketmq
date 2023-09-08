@@ -22,4 +22,11 @@ defmodule ExRocketmq.Models.MessageQueue do
       "queueId" => t.queue_id
     }
   end
+
+  @spec equal?(t(), t()) :: boolean()
+  def equal?(a, b) do
+    a.topic == b.topic &&
+      a.broker_name == b.broker_name &&
+      a.queue_id == b.queue_id
+  end
 end

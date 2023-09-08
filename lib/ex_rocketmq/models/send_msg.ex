@@ -121,10 +121,10 @@ defmodule ExRocketmq.Models.SendMsg do
     @spec from_pkt(Packet.t()) :: {:ok, t()} | Typespecs.error_t()
     def from_pkt(pkt) do
       with {:ok, status} <- get_status(pkt),
-           ext_fields <- Packet.packet(pkt, :ext_fields),
-           region_id <- Map.get(ext_fields, "MSG_REGION", "DefaultRegion"),
-           trace <- Map.get(ext_fields, "TRACE_ON", ""),
-           msg_id <- Map.get(ext_fields, "msgId", "") do
+           ext_fields = Packet.packet(pkt, :ext_fields),
+           region_id = Map.get(ext_fields, "MSG_REGION", "DefaultRegion"),
+           trace = Map.get(ext_fields, "TRACE_ON", ""),
+           msg_id = Map.get(ext_fields, "msgId", "") do
         {:ok,
          %__MODULE__{
            status: status,

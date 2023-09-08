@@ -49,6 +49,8 @@ defmodule ExRocketmq.Broker do
   require Response
   require Logger
 
+  import ExRocketmq.Util.Assertion
+
   use GenServer
 
   # req
@@ -70,6 +72,9 @@ defmodule ExRocketmq.Broker do
   # resp
   @resp_success Response.resp_success()
   @resp_error Response.resp_error()
+  @resp_pull_not_found Response.resp_pull_not_found()
+  @resp_pull_retry_immediately Response.resp_pull_retry_immediately()
+  @resp_pull_offset_moved Response.resp_pull_offset_moved()
   @resp_topic_not_exist Response.resp_topic_not_exist()
   @resp_service_not_available Response.res_service_not_available()
   @resp_no_permission Response.res_no_permission()
@@ -115,19 +120,15 @@ defmodule ExRocketmq.Broker do
 
   @spec heartbeat(pid(), Heartbeat.t()) :: :ok | Typespecs.error_t()
   def heartbeat(broker, heartbeat) do
-    with {:ok, body} <- Heartbeat.encode(heartbeat),
-         {:ok, resp_msg} <- GenServer.call(broker, {:rpc, @req_hearbeat, body, %{}}) do
-      resp_msg
-      |> Packet.packet(:code)
-      |> case do
-        @resp_success ->
-          GenServer.cast(broker, {:set_version, resp_msg |> Packet.packet(:version)})
-          :ok
-
-        code ->
-          remark = resp_msg |> Packet.packet(:remark)
-          {:error, %{code: code, remark: remark}}
-      end
+    with {:ok, body} = Heartbeat.encode(heartbeat),
+         {:ok, pkt} <- GenServer.call(broker, {:rpc, @req_hearbeat, body, %{}}),
+         :ok <-
+           do_assert(
+             fn -> Packet.packet(pkt, :code) == @resp_success end,
+             %{code: Packet.packet(pkt, :code), remark: Packet.packet(pkt, :remark)}
+           ) do
+      GenServer.cast(broker, {:set_version, Packet.packet(pkt, :version)})
+      :ok
     end
   end
 
@@ -139,9 +140,10 @@ defmodule ExRocketmq.Broker do
   @spec sync_send_message(pid(), SendMsg.Request.t(), binary()) ::
           {:ok, SendMsg.Response.t()} | Typespecs.error_t()
   def sync_send_message(broker, req, body) do
-    with ext_fields <- ExtFields.to_map(req),
-         code <- send_msg_code(req),
-         {:ok, pkt} <- send_with_retry(broker, code, body, ext_fields, 3),
+    ext_fields = ExtFields.to_map(req)
+    code = send_msg_code(req)
+
+    with {:ok, pkt} <- send_with_retry(broker, code, body, ext_fields, 3),
          {:ok, resp} <- SendMsg.Response.from_pkt(pkt) do
       q = %{resp.queue | topic: req.topic, broker_name: GenServer.call(broker, :broker_name)}
       {:ok, %{resp | queue: q}}
@@ -186,17 +188,28 @@ defmodule ExRocketmq.Broker do
   @spec one_way_send_message(pid(), SendMsg.Request.t(), binary()) ::
           :ok
   def one_way_send_message(broker, req, body) do
-    with ext_fields <- ExtFields.to_map(req),
-         code <- send_msg_code(req) do
-      GenServer.cast(broker, {:one_way, code, body, ext_fields})
-    end
+    ext_fields = ExtFields.to_map(req)
+    GenServer.cast(broker, {:one_way, send_msg_code(req), body, ext_fields})
   end
 
   @spec pull_message(pid(), PullMsg.Request.t()) ::
           {:ok, PullMsg.Response.t()} | Typespecs.error_t()
   def pull_message(broker, req) do
-    with ext_fields <- ExtFields.to_map(req),
-         {:ok, pkt} <- GenServer.call(broker, {:rpc, @req_pull_message, <<>>, ext_fields}),
+    ext_fields = ExtFields.to_map(req)
+
+    with {:ok, pkt} <- GenServer.call(broker, {:rpc, @req_pull_message, <<>>, ext_fields}),
+         :ok <-
+           do_assert(
+             fn ->
+               Packet.packet(pkt, :code) in [
+                 @resp_success,
+                 @resp_pull_not_found,
+                 @resp_pull_retry_immediately,
+                 @resp_pull_offset_moved
+               ]
+             end,
+             %{code: Packet.packet(pkt, :code), remark: Packet.packet(pkt, :remark)}
+           ),
          {:ok, resp} <- PullMsg.Response.from_pkt(pkt) do
       {:ok, resp}
     end
@@ -205,10 +218,16 @@ defmodule ExRocketmq.Broker do
   @spec query_consumer_offset(pid(), QueryConsumerOffset.t()) ::
           {:ok, non_neg_integer()} | Typespecs.error_t()
   def query_consumer_offset(broker, req) do
-    with ext_fields <- ExtFields.to_map(req),
-         {:ok, pkt} <-
+    ext_fields = ExtFields.to_map(req)
+
+    with {:ok, pkt} <-
            GenServer.call(broker, {:rpc, @req_query_consumer_offset, <<>>, ext_fields}),
-         ext_fields <- Packet.packet(pkt, :ext_fields) do
+         :ok <-
+           do_assert(
+             fn -> Packet.packet(pkt, :code) == @resp_success end,
+             %{code: Packet.packet(pkt, :code), remark: Packet.packet(pkt, :remark)}
+           ) do
+      ext_fields = Packet.packet(pkt, :ext_fields)
       {:ok, Map.get(ext_fields, "offset", "0") |> String.to_integer()}
     end
   end
@@ -216,39 +235,65 @@ defmodule ExRocketmq.Broker do
   @spec update_consumer_offset(pid(), UpdateConsumerOffset.t()) ::
           :ok | Typespecs.error_t()
   def update_consumer_offset(broker, req) do
-    with ext_fields <- ExtFields.to_map(req) do
-      GenServer.cast(broker, {:one_way, @req_update_consumer_offset, <<>>, ext_fields})
-    end
+    ext_fields = ExtFields.to_map(req)
+    GenServer.cast(broker, {:one_way, @req_update_consumer_offset, <<>>, ext_fields})
   end
 
   @spec search_offset_by_timestamp(pid(), SearchOffset.t()) ::
           {:ok, non_neg_integer()} | Typespecs.error_t()
   def search_offset_by_timestamp(broker, req) do
-    with ext_fields <- ExtFields.to_map(req),
-         {:ok, pkt} <-
+    ext_fields = ExtFields.to_map(req)
+
+    with {:ok, pkt} <-
            GenServer.call(broker, {:rpc, @req_search_offset_by_timestamp, <<>>, ext_fields}),
-         ext_fields <- Packet.packet(pkt, :ext_fields) do
-      {:ok, Map.get(ext_fields, "offset", "0") |> String.to_integer()}
+         :ok <-
+           do_assert(
+             fn -> Packet.packet(pkt, :code) == @resp_success end,
+             %{code: Packet.packet(pkt, :code), remark: Packet.packet(pkt, :remark)}
+           ) do
+      offset =
+        pkt
+        |> Packet.packet(:ext_fields)
+        |> Map.get("offset", "0")
+        |> String.to_integer()
+
+      {:ok, offset}
     end
   end
 
   @spec get_max_offset(pid(), GetMaxOffset.t()) ::
           {:ok, non_neg_integer()} | Typespecs.error_t()
   def get_max_offset(broker, req) do
-    with ext_fields <- ExtFields.to_map(req),
-         {:ok, pkt} <-
+    ext_fields = ExtFields.to_map(req)
+
+    with {:ok, pkt} <-
            GenServer.call(broker, {:rpc, @req_get_max_offset, <<>>, ext_fields}),
-         ext_fields <- Packet.packet(pkt, :ext_fields) do
-      {:ok, Map.get(ext_fields, "offset", "0") |> String.to_integer()}
+         :ok <-
+           do_assert(
+             fn -> Packet.packet(pkt, :code) == @resp_success end,
+             %{code: Packet.packet(pkt, :code), remark: Packet.packet(pkt, :remark)}
+           ) do
+      offset =
+        pkt
+        |> Packet.packet(:ext_fields)
+        |> Map.get("offset", "0")
+        |> String.to_integer()
+
+      {:ok, offset}
     end
   end
 
   @spec consumer_send_msg_back(pid(), ConsumerSendMsgBack.t()) ::
           :ok | Typespecs.error_t()
   def consumer_send_msg_back(broker, req) do
-    with ext_fields <- ExtFields.to_map(req),
+    with ext_fields = ExtFields.to_map(req),
          {:ok, pkt} <-
-           GenServer.call(broker, {:rpc, @req_consumer_send_msg_back, <<>>, ext_fields}) do
+           GenServer.call(broker, {:rpc, @req_consumer_send_msg_back, <<>>, ext_fields}),
+         :ok <-
+           do_assert(
+             fn -> Packet.packet(pkt, :code) == @resp_success end,
+             %{code: Packet.packet(pkt, :code), remark: Packet.packet(pkt, :remark)}
+           ) do
       case Packet.packet(pkt, :code) do
         @resp_success ->
           :ok
@@ -263,9 +308,14 @@ defmodule ExRocketmq.Broker do
   @spec get_consumer_list_by_group(pid(), String.t()) ::
           {:ok, list(String.t())} | Typespecs.error_t()
   def get_consumer_list_by_group(broker, group) do
-    with ext_field <- %{"consumerGroup" => group},
+    with ext_field = %{"consumerGroup" => group},
          {:ok, pkt} <-
            GenServer.call(broker, {:rpc, @req_get_consumer_list_by_group, <<>>, ext_field}),
+         :ok <-
+           do_assert(
+             fn -> Packet.packet(pkt, :code) == @resp_success end,
+             %{code: Packet.packet(pkt, :code), remark: Packet.packet(pkt, :remark)}
+           ),
          {:ok, %{"consumerIdList" => consumer_list}} <- Jason.decode(Packet.packet(pkt, :body)) do
       {:ok, consumer_list}
     end
@@ -273,32 +323,35 @@ defmodule ExRocketmq.Broker do
 
   @spec end_transaction(pid(), EndTransaction.t()) :: :ok | Typespecs.error_t()
   def end_transaction(broker, req) do
-    with ext_fields <- ExtFields.to_map(req) do
-      GenServer.cast(broker, {:one_way, @req_end_transaction, <<>>, ext_fields})
-    end
+    ext_fields = ExtFields.to_map(req)
+    GenServer.cast(broker, {:one_way, @req_end_transaction, <<>>, ext_fields})
   end
 
   @spec lock_batch_mq(pid(), Lock.Req.t()) :: {:ok, Lock.Resp.t()} | Typespecs.error_t()
   def lock_batch_mq(broker, req) do
-    with body <- Lock.Req.encode(req),
+    with body = Lock.Req.encode(req),
          {:ok, pkt} <- GenServer.call(broker, {:rpc, @req_lock_batch_mq, body, %{}}),
-         body <- Packet.packet(pkt, :body) do
-      {:ok, Lock.Resp.decode(body)}
+         :ok <-
+           do_assert(
+             fn -> Packet.packet(pkt, :code) == @resp_success end,
+             %{code: Packet.packet(pkt, :code), remark: Packet.packet(pkt, :remark)}
+           ) do
+      Packet.packet(pkt, :body)
+      |> Lock.Resp.decode()
+      |> then(&{:ok, &1})
     end
   end
 
   @spec unlock_batch_mq(pid(), Lock.Req.t()) :: :ok | Typespecs.error_t()
   def unlock_batch_mq(broker, req) do
-    with body <- Lock.Req.encode(req),
-         {:ok, pkt} <- GenServer.call(broker, {:rpc, @req_unlock_batch_mq, body, %{}}) do
-      case Packet.packet(pkt, :code) do
-        @resp_success ->
-          :ok
-
-        code ->
-          remark = Packet.packet(pkt, :remark)
-          {:error, %{code: code, remark: remark}}
-      end
+    with body = Lock.Req.encode(req),
+         {:ok, pkt} <- GenServer.call(broker, {:rpc, @req_unlock_batch_mq, body, %{}}),
+         :ok <-
+           do_assert(
+             fn -> Packet.packet(pkt, :code) == @resp_success end,
+             %{code: Packet.packet(pkt, :code), remark: Packet.packet(pkt, :remark)}
+           ) do
+      :ok
     end
   end
 

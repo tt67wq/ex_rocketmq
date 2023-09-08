@@ -13,7 +13,7 @@ defmodule ExRocketmq.Consumer.BalanceStrategy do
               client_id :: String.t(),
               mq_all :: list(MessageQueue.t()),
               cid_all :: list(String.t())
-            ) :: {:ok, list(MessageQueue.t())} | Typespecs.error_t()
+            ) :: {:ok, list(MessageQueue.t())}
 
   defp delegate(%module{} = m, func, args),
     do: apply(module, func, [m | args])
@@ -23,7 +23,7 @@ defmodule ExRocketmq.Consumer.BalanceStrategy do
           client_id :: String.t(),
           mq_all :: list(MessageQueue.t()),
           cid_all :: list(String.t())
-        ) :: {:ok, list(MessageQueue.t())} | Typespecs.error_t()
+        ) :: {:ok, list(MessageQueue.t())}
   def allocate(m, client_id, mq_all, cid_all),
     do: delegate(m, :allocate, [client_id, mq_all, cid_all])
 end
@@ -54,10 +54,11 @@ defmodule ExRocketmq.Consumer.BalanceStrategy.Average do
           cid_all :: list(String.t())
         ) :: {:ok, list(MessageQueue.t())} | Typespecs.error_t()
   def allocate(_, client_id, mq_all, cid_all) do
-    with mq_all <- Enum.sort_by(mq_all, & &1.queue_id),
-         cid_all <- Enum.sort(cid_all),
-         idx <- get_cid_index(client_id, cid_all),
-         :ok <- do_assert(fn -> idx >= 0 end, "client_id #{client_id} not in cid_all") do
+    mq_all = Enum.sort_by(mq_all, & &1.queue_id)
+    cid_all = Enum.sort(cid_all)
+    idx = get_cid_index(client_id, cid_all)
+
+    with :ok <- do_assert(fn -> idx >= 0 end, "client_id #{client_id} not in cid_all") do
       do_allocate(mq_all, cid_all, idx)
     end
   end

@@ -13,7 +13,7 @@ defmodule ExRocketmq.Producer do
             group_name: String.t(),
             namesrvs: pid() | atom(),
             task_supervisor: pid(),
-            dynamic_supervisor: pid(),
+            broker_dynamic_supervisor: pid(),
             registry: pid(),
             uniqid: pid(),
             publish_info_map: %{
@@ -28,7 +28,7 @@ defmodule ExRocketmq.Producer do
               group_name: "",
               namesrvs: nil,
               task_supervisor: nil,
-              dynamic_supervisor: nil,
+              broker_dynamic_supervisor: nil,
               registry: nil,
               uniqid: nil,
               publish_info_map: %{},
@@ -239,7 +239,7 @@ defmodule ExRocketmq.Producer do
 
     {:ok, uniqid} = Util.UniqId.start_link()
     {:ok, task_supervisor} = Task.Supervisor.start_link()
-    {:ok, dynamic_supervisor} = DynamicSupervisor.start_link([])
+    {:ok, broker_dynamic_supervisor} = DynamicSupervisor.start_link([])
 
     {:ok,
      %State{
@@ -247,7 +247,7 @@ defmodule ExRocketmq.Producer do
        group_name: opts[:group_name],
        namesrvs: opts[:namesrvs],
        task_supervisor: task_supervisor,
-       dynamic_supervisor: dynamic_supervisor,
+       broker_dynamic_supervisor: broker_dynamic_supervisor,
        registry: registry,
        uniqid: uniqid,
        publish_info_map: %{},
@@ -259,7 +259,7 @@ defmodule ExRocketmq.Producer do
 
   def terminate(reason, %State{
         uniqid: uniqid,
-        dynamic_supervisor: dynamic_supervisor,
+        broker_dynamic_supervisor: broker_dynamic_supervisor,
         task_supervisor: task_supervisor
       }) do
     Logger.info("producer terminate, reason: #{inspect(reason)}")
@@ -274,12 +274,13 @@ defmodule ExRocketmq.Producer do
     end)
 
     # stop all broker
-    DynamicSupervisor.which_children(dynamic_supervisor)
-    |> Enum.each(fn {_, pid, _, _} ->
-      DynamicSupervisor.terminate_child(dynamic_supervisor, pid)
+    broker_dynamic_supervisor
+    |> Util.SupervisorHelper.all_pids_under_supervisor()
+    |> Enum.each(fn pid ->
+      DynamicSupervisor.terminate_child(broker_dynamic_supervisor, pid)
     end)
 
-    DynamicSupervisor.stop(dynamic_supervisor)
+    DynamicSupervisor.stop(broker_dynamic_supervisor)
   end
 
   def handle_continue(:on_start, state) do
@@ -310,7 +311,7 @@ defmodule ExRocketmq.Producer do
           group_name: group_name,
           transaction_listener: tl,
           registry: registry,
-          dynamic_supervisor: dynamic_supervisor
+          broker_dynamic_supervisor: broker_dynamic_supervisor
         } = state
       ) do
     with msg <- %{
@@ -347,7 +348,7 @@ defmodule ExRocketmq.Producer do
              bd.broker_name,
              BrokerData.master_addr(bd),
              registry,
-             dynamic_supervisor
+             broker_dynamic_supervisor
            ),
          :ok <- Broker.end_transaction(broker_pid, req) do
       {:reply, {:ok, resp, transaction_state}, %{state | publish_info_map: pmap}}
@@ -418,7 +419,7 @@ defmodule ExRocketmq.Producer do
         %State{
           client_id: cid,
           group_name: group_name,
-          registry: registry
+          broker_dynamic_supervisor: broker_dynamic_supervisor
         } = state
       ) do
     heartbeat_data = %Heartbeat{
@@ -426,8 +427,8 @@ defmodule ExRocketmq.Producer do
       producer_data_set: [%ProducerData{group: group_name}]
     }
 
-    registry
-    |> all_broker_pids()
+    broker_dynamic_supervisor
+    |> Util.SupervisorHelper.all_pids_under_supervisor()
     |> Enum.map(fn pid ->
       Task.async(fn -> Broker.heartbeat(pid, heartbeat_data) end)
     end)
@@ -441,25 +442,28 @@ defmodule ExRocketmq.Producer do
   # ------- private funcs ------
 
   defp notify_check_transaction_state(pkt, transaction_listener, group_name, broker_pid) do
-    with {:ok, header} <- CheckTransactionState.decode(Packet.packet(pkt, :ext_fields)),
-         [msg_ext] <- MessageExt.decode_from_binary(Packet.packet(pkt, :body)),
-         %MessageExt{message: msg} = msg_ext <- %MessageExt{
-           msg_ext
-           | message: set_tranaction_id(msg_ext.message)
-         },
-         uniq_key <- Map.get(msg.properties, @property_unique_client_msgid_key, msg_ext.msg_id),
-         transaction_id <-
-           Map.get(msg.properties, @property_transaction_id, header.transaction_id),
-         {:ok, transaction_state} <-
+    header = CheckTransactionState.decode(Packet.packet(pkt, :ext_fields))
+
+    [msg_ext] = MessageExt.decode_from_binary(Packet.packet(pkt, :body))
+
+    msg_ext = %MessageExt{
+      msg_ext
+      | message: set_tranaction_id(msg_ext.message)
+    }
+
+    %MessageExt{message: msg} = msg_ext
+
+    with {:ok, transaction_state} <-
            ExRocketmq.Producer.Transaction.check_local(transaction_listener, msg_ext),
-         req <- %EndTransaction{
+         req = %EndTransaction{
            producer_group: group_name,
            tran_state_table_offset: header.tran_state_table_offset,
            commit_log_offset: header.commit_log_offset,
            commit_or_rollback: transaction_state_to_type(transaction_state),
            from_transaction_check: true,
-           msg_id: uniq_key,
-           transaction_id: transaction_id
+           msg_id: Map.get(msg.properties, @property_unique_client_msgid_key, msg_ext.msg_id),
+           transaction_id:
+             Map.get(msg.properties, @property_transaction_id, header.transaction_id)
          } do
       Broker.end_transaction(broker_pid, req)
     else
@@ -478,28 +482,23 @@ defmodule ExRocketmq.Producer do
          registry: registry,
          uniqid: uniqid,
          compress: compress,
-         dynamic_supervisor: dynamic_supervisor
+         broker_dynamic_supervisor: broker_dynamic_supervisor
        }) do
-    with msg <- encode_batch(msgs),
-         msg <- set_uniqid(msg, uniqid),
-         msg <-
-           compress_msg(
-             msg,
-             compress[:compress_over],
-             compress[:compressor],
-             compress[:compress_level]
-           ),
-         sysflag <- compress_sysflag(msg, 0),
-         sysflag <- transaction_sysflag(msg, sysflag),
-         msg_type <- Map.get(msg.properties, @property_msg_type, ""),
-         pmap <- update_publish_info(pmap, msg.topic, namesrvs),
-         {:ok, {broker_datas, mqs}} <- Map.fetch(pmap, msg.topic),
-         mq <- MqSelector.select(selector, msg, mqs),
-         req <- %SendMsg.Request{
+    msg =
+      msgs
+      |> encode_batch()
+      |> set_uniqid(uniqid)
+      |> compress_msg(compress[:compress_over], compress[:compressor], compress[:compress_level])
+
+    pmap = update_publish_info(pmap, msg.topic, namesrvs)
+
+    with {:ok, {broker_datas, mqs}} <- get_publish_info(pmap, msg.topic),
+         mq = MqSelector.select(selector, msg, mqs),
+         req = %SendMsg.Request{
            producer_group: group_name,
            topic: msg.topic,
            queue_id: mq.queue_id,
-           sys_flag: sysflag,
+           sys_flag: transaction_sysflag(msg, compress_sysflag(msg, 0)),
            born_timestamp: System.system_time(:millisecond),
            flag: msg.flag,
            properties: Message.encode_properties(msg),
@@ -507,7 +506,7 @@ defmodule ExRocketmq.Producer do
            max_reconsume_times: 3,
            unit_mode: false,
            batch: msg.batch,
-           reply: msg_type == "reply",
+           reply: Map.get(msg.properties, @property_msg_type, "") == "reply",
            default_topic: "TBW102",
            default_topic_queue_num: 4
          },
@@ -517,7 +516,7 @@ defmodule ExRocketmq.Producer do
              bd.broker_name,
              BrokerData.master_addr(bd),
              registry,
-             dynamic_supervisor
+             broker_dynamic_supervisor
            ) do
       {:ok, {broker_pid, req, msg, pmap}}
     end
@@ -589,7 +588,7 @@ defmodule ExRocketmq.Producer do
   defp encode_batch([msg]), do: msg
 
   @spec get_or_new_broker(String.t(), String.t(), atom(), pid()) :: pid()
-  defp get_or_new_broker(broker_name, addr, registry, dynamic_supervisor) do
+  defp get_or_new_broker(broker_name, addr, registry, broker_dynamic_supervisor) do
     Registry.lookup(registry, addr)
     |> case do
       [] ->
@@ -603,7 +602,8 @@ defmodule ExRocketmq.Producer do
           opts: [name: {:via, Registry, {registry, addr}}]
         ]
 
-        {:ok, pid} = DynamicSupervisor.start_child(dynamic_supervisor, {Broker, broker_opts})
+        {:ok, pid} =
+          DynamicSupervisor.start_child(broker_dynamic_supervisor, {Broker, broker_opts})
 
         # bind self to broker, then notify from broker will send to self
         Broker.controlling_process(pid, self())
@@ -664,11 +664,6 @@ defmodule ExRocketmq.Producer do
 
   defp set_tranaction_id(msg), do: msg
 
-  @spec all_broker_pids(atom()) :: list(pid())
-  defp all_broker_pids(registry) do
-    Registry.select(registry, [{{:"$1", :"$2", :"$3"}, [], [:"$2"]}])
-  end
-
   @spec get_msg_id(%SendMsg.Response{}) :: {:ok, MessageId.t()} | {:error, any()}
   defp get_msg_id(%SendMsg.Response{offset_msg_id: offset_msg_id}) when offset_msg_id != "",
     do: MessageId.decode(offset_msg_id)
@@ -682,5 +677,15 @@ defmodule ExRocketmq.Producer do
        @transaction_rollback -> @transaction_rollback_type
        _ -> @transaction_not_type
      end).(transaction_state)
+  end
+
+  @spec get_publish_info(publish_map(), Typespecs.topic()) ::
+          {:ok, {list(BrokerData.t()), list(MessageQueue.t())}} | {:error, any()}
+  defp get_publish_info(pmap, topic) do
+    Map.fetch(pmap, topic)
+    |> case do
+      {:ok, _} = val -> val
+      _ -> {:error, "topic not in publish info"}
+    end
   end
 end

@@ -73,21 +73,20 @@ defmodule ExRocketmq.Models.CheckTransactionState do
     }
   end
 
-  @spec decode(Typespecs.ext_fields()) :: {:ok, t()} | {:error, any()}
+  @spec decode(Typespecs.ext_fields()) :: t()
   def decode(ext_fields) do
-    with tran_state_table_offset <- Map.get(ext_fields, "tranStateTableOffset", "0"),
-         commit_log_offset <- Map.get(ext_fields, "commitLogOffset", "0"),
-         msg_id <- Map.get(ext_fields, "msgId", ""),
-         transaction_id <- Map.get(ext_fields, "transactionId", ""),
-         offset_msg_id <- Map.get(ext_fields, "offsetMsgId", "") do
-      {:ok,
-       %__MODULE__{
-         tran_state_table_offset: String.to_integer(tran_state_table_offset),
-         commit_log_offset: String.to_integer(commit_log_offset),
-         msg_id: msg_id,
-         transaction_id: transaction_id,
-         offset_msg_id: offset_msg_id
-       }}
-    end
+    tran_state_table_offset = Map.get(ext_fields, "tranStateTableOffset", "0")
+    commit_log_offset = Map.get(ext_fields, "commitLogOffset", "0")
+    msg_id = Map.get(ext_fields, "msgId", "")
+    transaction_id = Map.get(ext_fields, "transactionId", "")
+    offset_msg_id = Map.get(ext_fields, "offsetMsgId", "")
+
+    %__MODULE__{
+      tran_state_table_offset: String.to_integer(tran_state_table_offset),
+      commit_log_offset: String.to_integer(commit_log_offset),
+      msg_id: msg_id,
+      transaction_id: transaction_id,
+      offset_msg_id: offset_msg_id
+    }
   end
 end

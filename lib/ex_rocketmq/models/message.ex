@@ -133,58 +133,59 @@ defmodule ExRocketmq.Models.MessageExt do
   defp decode_one(<<>>, acc), do: acc
 
   defp decode_one(body, acc) do
-    with <<
-           store_size::big-integer-size(32),
-           _magic::size(32),
-           body_crc::big-integer-size(32),
-           queue_id::big-integer-size(32),
-           flag::big-integer-size(32),
-           queue_offset::big-integer-size(64),
-           commit_log_offset::big-integer-size(64),
-           sys_flag::big-integer-size(32),
-           born_timestamp::big-integer-size(64),
-           rest::binary
-         >> <- body,
-         {_, born_host, _port, rest} <- parse_host_and_port(sys_flag, rest),
-         <<store_timestamp::big-integer-size(64), rest::binary>> <- rest,
-         {host_bin, store_host, port, rest} <- parse_host_and_port(sys_flag, rest),
-         offset_message_id <- get_offset_message_id(host_bin, port, commit_log_offset),
-         <<reconsume_times::big-integer-size(32),
-           prepared_transaction_offset::big-integer-size(64), body_length::big-integer-size(32),
-           rest::binary>> <- rest,
-         <<body::bytes-size(body_length), rest::binary>> <- rest,
-         body <- uncompress(sys_flag, body),
-         <<topic_length::big-integer-size(8), rest::binary>> <- rest,
-         <<topic::bytes-size(topic_length), rest::binary>> <- rest,
-         <<properties_length::big-integer-size(16), rest::binary>> <- rest,
-         <<properties_binary::bytes-size(properties_length), rest::binary>> <- rest,
-         properties <- Message.decode_properties(properties_binary),
-         msg_id <- Map.get(properties, @property_unique_client_msgid_key, offset_message_id) do
-      ext = %__MODULE__{
-        message: %Message{
-          topic: topic,
-          body: body,
-          flag: flag,
-          queue_id: queue_id,
-          properties: properties
-        },
-        msg_id: msg_id,
-        offset_msg_id: offset_message_id,
-        store_size: store_size,
-        queue_offset: queue_offset,
-        sys_flag: sys_flag,
-        born_timestamp: born_timestamp,
-        born_host: born_host,
-        store_timestamp: store_timestamp,
-        store_host: store_host,
-        commit_log_offset: commit_log_offset,
-        body_crc: body_crc,
-        reconsume_times: reconsume_times,
-        prepared_transaction_offset: prepared_transaction_offset
-      }
+    <<
+      store_size::big-integer-size(32),
+      _magic::size(32),
+      body_crc::big-integer-size(32),
+      queue_id::big-integer-size(32),
+      flag::big-integer-size(32),
+      queue_offset::big-integer-size(64),
+      commit_log_offset::big-integer-size(64),
+      sys_flag::big-integer-size(32),
+      born_timestamp::big-integer-size(64),
+      rest::binary
+    >> = body
 
-      decode_one(rest, [ext | acc])
-    end
+    {_, born_host, _port, rest} = parse_host_and_port(sys_flag, rest)
+    <<store_timestamp::big-integer-size(64), rest::binary>> = rest
+    {host_bin, store_host, port, rest} = parse_host_and_port(sys_flag, rest)
+    offset_message_id = get_offset_message_id(host_bin, port, commit_log_offset)
+
+    <<reconsume_times::big-integer-size(32), prepared_transaction_offset::big-integer-size(64),
+      body_length::big-integer-size(32), rest::binary>> = rest
+
+    <<body::bytes-size(body_length), rest::binary>> = rest
+    body = uncompress(sys_flag, body)
+    <<topic_length::big-integer-size(8), rest::binary>> = rest
+    <<topic::bytes-size(topic_length), rest::binary>> = rest
+    <<properties_length::big-integer-size(16), rest::binary>> = rest
+    <<properties_binary::bytes-size(properties_length), rest::binary>> = rest
+    properties = Message.decode_properties(properties_binary)
+
+    ext = %__MODULE__{
+      message: %Message{
+        topic: topic,
+        body: body,
+        flag: flag,
+        queue_id: queue_id,
+        properties: properties
+      },
+      msg_id: Map.get(properties, @property_unique_client_msgid_key, offset_message_id),
+      offset_msg_id: offset_message_id,
+      store_size: store_size,
+      queue_offset: queue_offset,
+      sys_flag: sys_flag,
+      born_timestamp: born_timestamp,
+      born_host: born_host,
+      store_timestamp: store_timestamp,
+      store_host: store_host,
+      commit_log_offset: commit_log_offset,
+      body_crc: body_crc,
+      reconsume_times: reconsume_times,
+      prepared_transaction_offset: prepared_transaction_offset
+    }
+
+    decode_one(rest, [ext | acc])
   end
 
   @spec parse_host_and_port(non_neg_integer(), binary()) ::
