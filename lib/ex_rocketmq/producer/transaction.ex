@@ -43,12 +43,6 @@ defmodule ExRocketmq.Producer.MockTransaction do
 
   @type t :: %__MODULE__{}
 
-  @transaction_state %{
-    "commit" => ExRocketmq.Protocol.Transaction.commit(),
-    "rollback" => ExRocketmq.Protocol.Transaction.rollback(),
-    "unknown" => ExRocketmq.Protocol.Transaction.unknown()
-  }
-
   def new(), do: %__MODULE__{}
 
   def execute_local(_, msg) do
@@ -56,11 +50,11 @@ defmodule ExRocketmq.Producer.MockTransaction do
       "execute local transaction for #{inspect(msg)} in mock transaction implementation"
     )
 
-    {:ok, @transaction_state["unknown"]}
+    {:ok, :commit}
   end
 
   def check_local(_, msg) do
     Logger.info("check local transaction for #{inspect(msg)} in mock transaction implementation")
-    {:ok, @transaction_state["commit"]}
+    {:ok, :commit}
   end
 end

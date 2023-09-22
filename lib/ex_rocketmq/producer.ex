@@ -150,10 +150,6 @@ defmodule ExRocketmq.Producer do
   # resp
   @resp_success Response.resp_success()
 
-  # transaction
-  @transaction_commit Transaction.commit()
-  @transaction_rollback Transaction.rollback()
-
   # transaction type
   @transaction_not_type Transaction.not_type()
   @transaction_commit_type Transaction.commit_type()
@@ -673,8 +669,8 @@ defmodule ExRocketmq.Producer do
   @spec transaction_state_to_type(Typespecs.transaction_state()) :: Typespecs.transaction_type()
   defp transaction_state_to_type(transaction_state) do
     (fn
-       @transaction_commit -> @transaction_commit_type
-       @transaction_rollback -> @transaction_rollback_type
+       :commit -> @transaction_commit_type
+       :rollback -> @transaction_rollback_type
        _ -> @transaction_not_type
      end).(transaction_state)
   end

@@ -41,6 +41,7 @@ defmodule ExRocketmq.Broker do
     SearchOffset,
     GetMaxOffset,
     EndTransaction,
+    ConsumerSendMsgBack,
     Lock
   }
 
@@ -294,14 +295,7 @@ defmodule ExRocketmq.Broker do
              fn -> Packet.packet(pkt, :code) == @resp_success end,
              %{code: Packet.packet(pkt, :code), remark: Packet.packet(pkt, :remark)}
            ) do
-      case Packet.packet(pkt, :code) do
-        @resp_success ->
-          :ok
-
-        code ->
-          remark = Packet.packet(pkt, :remark)
-          {:error, %{code: code, remark: remark}}
-      end
+      :ok
     end
   end
 

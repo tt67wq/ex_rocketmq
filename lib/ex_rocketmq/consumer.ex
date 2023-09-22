@@ -87,7 +87,9 @@ defmodule ExRocketmq.Consumer do
     PullMsg,
     QueryConsumerOffset,
     GetMaxOffset,
-    SearchOffset
+    SearchOffset,
+    ConsumerSendMsgBack,
+    MessageExt
   }
 
   require Logger
@@ -705,7 +707,16 @@ defmodule ExRocketmq.Consumer do
           }} <- Broker.pull_message(broker, pull_req) do
       case status do
         @pull_status_found ->
-          consume_msgs_concurrently(message_exts, consume_batch_size, topic, processor)
+          consume_msgs_concurrently(
+            message_exts,
+            consume_batch_size,
+            topic,
+            processor,
+            bd,
+            group_name,
+            registry,
+            dynamic_supervisor
+          )
 
           pull_msg(%{
             pt
@@ -824,19 +835,121 @@ defmodule ExRocketmq.Consumer do
   end
 
   @spec consume_msgs_concurrently(
-          list(Models.MessageExt.t()),
+          list(MessageExt.t()),
           non_neg_integer(),
           Typespecs.topic(),
-          any()
+          any(),
+          BrokerData.t(),
+          Typespecs.group_name(),
+          atom(),
+          pid()
         ) ::
           any()
-  defp consume_msgs_concurrently(message_exts, batch, topic, processor) do
+  defp consume_msgs_concurrently(
+         message_exts,
+         batch,
+         topic,
+         processor,
+         bd,
+         group,
+         registry,
+         dynamic_supervisor
+       ) do
     message_exts
     |> Enum.chunk_every(batch)
     |> Enum.map(fn msgs ->
-      Task.async(fn -> Processor.process(processor, topic, msgs) end)
+      Task.async(fn ->
+        process_with_retry(
+          msgs,
+          processor,
+          topic,
+          bd,
+          group,
+          registry,
+          dynamic_supervisor
+        )
+      end)
     end)
     |> Task.await_many()
+  end
+
+  defp process_with_retry(
+         msgs,
+         processor,
+         topic,
+         bd,
+         group,
+         registry,
+         dynamic_supervisor
+       ) do
+    Processor.process(processor, topic, msgs)
+    |> case do
+      :success ->
+        :ok
+
+      _ ->
+        # send msg back
+        send_msgs_back(msgs, bd, group, registry, dynamic_supervisor)
+        |> case do
+          [] ->
+            :ok
+
+          # send back failed, sleep 5s and retry local process
+          failed_msgs ->
+            Process.sleep(5000)
+
+            process_with_retry(
+              failed_msgs,
+              processor,
+              topic,
+              bd,
+              group,
+              registry,
+              dynamic_supervisor
+            )
+        end
+    end
+  end
+
+  @spec send_msgs_back(
+          list(MessageExt.t()),
+          BrokerData.t(),
+          Typespecs.group_name(),
+          atom(),
+          pid()
+        ) ::
+          list(MessageExt.t())
+  defp send_msgs_back(msgs, bd, group, registry, dynamic_supervisor) do
+    broker =
+      get_or_new_broker(
+        bd.broker_name,
+        BrokerData.master_addr(bd),
+        registry,
+        dynamic_supervisor
+      )
+
+    msgs
+    |> Enum.map(fn msg ->
+      Task.async(fn ->
+        Logger.info("send msg back: #{inspect(msg)}")
+
+        Broker.consumer_send_msg_back(broker, %ConsumerSendMsgBack{
+          group: group,
+          offset: msg.commit_log_offset,
+          delay_level: 1,
+          origin_msg_id: msg.msg_id,
+          origin_topic: msg.message.topic,
+          unit_mode: false,
+          max_reconsume_times: 16
+        })
+        |> case do
+          :ok -> nil
+          _ -> msg
+        end
+      end)
+    end)
+    |> Task.await_many()
+    |> Enum.filter(&(&1 != nil))
   end
 
   @spec do_heartbeat(State.t()) :: :ok

@@ -7,14 +7,15 @@ defmodule ExRocketmq.Consumer.Processor do
   alias ExRocketmq.Typespecs
 
   @type t :: struct()
+  @type consume_result :: :success | :retry_later | :commit | :rollback | :suspend
 
   @callback process(processort :: t(), topic :: Typespecs.topic(), msgs :: [MessageExt.t()]) ::
-              :ok | {:error, term()}
+              consume_result() | {:error, term()}
 
   defp delegate(%module{} = m, func, args),
     do: apply(module, func, [m | args])
 
-  @spec process(t(), Typespecs.topic(), [MessageExt.t()]) :: :ok | {:error, term()}
+  @spec process(t(), Typespecs.topic(), [MessageExt.t()]) :: consume_result() | {:error, term()}
   def process(m, topic, msgs), do: delegate(m, :process, [topic, msgs])
 end
 
@@ -34,11 +35,12 @@ defmodule ExRocketmq.Consumer.MockProcessor do
 
   @type t :: %__MODULE__{}
 
-  @spec process(t(), Typespecs.topic(), [MessageExt.t()]) :: :ok | {:error, term()}
+  @spec process(t(), Typespecs.topic(), [MessageExt.t()]) ::
+          Processor.consume_result() | {:error, term()}
   def process(_, topic, msgs) do
     msgs
     |> Enum.map(fn msg -> IO.puts("#{topic}: #{msg.queue_offset} -- #{msg.message.body}") end)
 
-    :ok
+    :success
   end
 end

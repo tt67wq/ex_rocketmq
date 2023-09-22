@@ -3,10 +3,6 @@ defmodule ExRocketmq.Protocol.Transaction do
 
   import ExRocketmq.Util.Const
 
-  const :commit, 0
-  const :rollback, 1
-  const :unknown, 2
-
   const :not_type, 0
   const :prepare_type, Bitwise.bsl(0x1, 2)
   const :commit_type, Bitwise.bsl(0x2, 2)
