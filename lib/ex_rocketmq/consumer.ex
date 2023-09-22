@@ -299,21 +299,28 @@ defmodule ExRocketmq.Consumer do
       ) do
     topic = with_namespace(topic, namespace)
 
-    sub = message_selector_to_subscription(topic, msg_selector)
+    case Map.fetch(cmap, topic) do
+      {:ok, _} ->
+        Logger.warning("topic already been subscribed: #{topic}")
+        {:reply, {:error, "topic already subscibed"}, state}
 
-    with {:ok, {broker_datas, mqs}} <- fetch_consume_info(namesrvs, topic) do
-      state = %State{
-        state
-        | consume_info_map: Map.put(cmap, topic, {sub, broker_datas, mqs, %{}})
-      }
+      :error ->
+        sub = message_selector_to_subscription(topic, msg_selector)
 
-      do_heartbeat(state)
+        with {:ok, {broker_datas, mqs}} <- fetch_consume_info(namesrvs, topic) do
+          state = %State{
+            state
+            | consume_info_map: Map.put(cmap, topic, {sub, broker_datas, mqs, %{}})
+          }
 
-      {:reply, :ok, state}
-    else
-      {:error, reason} ->
-        Logger.error("fetch consume info for topic: #{topic} error: #{inspect(reason)}")
-        {:reply, reason, state}
+          do_heartbeat(state)
+
+          {:reply, :ok, state}
+        else
+          {:error, reason} = error ->
+            Logger.error("fetch consume info for topic: #{topic} error: #{inspect(reason)}")
+            {:reply, error, state}
+        end
     end
   end
 
