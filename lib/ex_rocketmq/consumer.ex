@@ -324,12 +324,30 @@ defmodule ExRocketmq.Consumer do
           consume_opts: %{
             namespace: namespace
           },
-          consume_info_map: cmap
+          consume_info_map: cmap,
+          task_supervisor: task_supervisor
         } = state
       ) do
     topic = with_namespace(topic, namespace)
-    # TODO: stop consume task
-    {:reply, :ok, %State{state | consume_info_map: Map.delete(cmap, topic)}}
+
+    cmap =
+      Map.pop(cmap, topic)
+      |> case do
+        {nil, cmap} ->
+          cmap
+
+        {{_sub, _broker_datas, _mqs, consume_tasks}, cmap} ->
+          # stop consume task
+          consume_tasks
+          |> Map.values()
+          |> Enum.each(fn pid ->
+            Task.Supervisor.terminate_child(task_supervisor, pid)
+          end)
+
+          cmap
+      end
+
+    {:reply, :ok, %State{state | consume_info_map: cmap}}
   end
 
   def handle_info(
