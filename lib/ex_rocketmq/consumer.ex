@@ -887,9 +887,11 @@ defmodule ExRocketmq.Consumer do
       :success ->
         :ok
 
-      _ ->
+      {:retry_later, delay_level} ->
         # send msg back
-        send_msgs_back(msgs, bd, group, registry, dynamic_supervisor)
+        msgs
+        |> Enum.map(&%{&1 | delay_level: delay_level})
+        |> send_msgs_back(bd, group, registry, dynamic_supervisor)
         |> case do
           [] ->
             :ok
@@ -936,7 +938,7 @@ defmodule ExRocketmq.Consumer do
         Broker.consumer_send_msg_back(broker, %ConsumerSendMsgBack{
           group: group,
           offset: msg.commit_log_offset,
-          delay_level: 1,
+          delay_level: msg.delay_level,
           origin_msg_id: msg.msg_id,
           origin_topic: msg.message.topic,
           unit_mode: false,

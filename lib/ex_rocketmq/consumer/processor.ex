@@ -7,7 +7,11 @@ defmodule ExRocketmq.Consumer.Processor do
   alias ExRocketmq.Typespecs
 
   @type t :: struct()
-  @type consume_result :: :success | :retry_later | :commit | :rollback | :suspend
+  @type concurrent_consume_result ::
+          :success | {:retry_later, Typespecs.delay_level()}
+  @type orderly_consume_result :: :commit | :rollback | :suspend
+
+  @type consume_result :: concurrent_consume_result() | orderly_consume_result()
 
   @callback process(processort :: t(), topic :: Typespecs.topic(), msgs :: [MessageExt.t()]) ::
               consume_result() | {:error, term()}

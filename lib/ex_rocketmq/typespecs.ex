@@ -32,4 +32,5 @@ defmodule ExRocketmq.Typespecs do
   @type transaction_type :: non_neg_integer()
   @type consumer_model :: :cluster | :broadcast
   @type consume_from_where :: :last_offset | :first_offset | :timestamp
+  @type delay_level :: non_neg_integer()
 end

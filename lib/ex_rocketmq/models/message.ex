@@ -80,6 +80,7 @@ defmodule ExRocketmq.Models.MessageExt do
   """
 
   alias ExRocketmq.{
+    Typespecs,
     Util.Network,
     Compressor,
     Compress.Zlib,
@@ -108,7 +109,8 @@ defmodule ExRocketmq.Models.MessageExt do
             commit_log_offset: 0,
             body_crc: 0,
             reconsume_times: 0,
-            prepared_transaction_offset: 0
+            prepared_transaction_offset: 0,
+            delay_level: 0
 
   @type t :: %__MODULE__{
           message: Message.t(),
@@ -124,7 +126,8 @@ defmodule ExRocketmq.Models.MessageExt do
           commit_log_offset: non_neg_integer(),
           body_crc: non_neg_integer(),
           reconsume_times: non_neg_integer(),
-          prepared_transaction_offset: non_neg_integer()
+          prepared_transaction_offset: non_neg_integer(),
+          delay_level: Typespecs.delay_level()
         }
 
   @spec decode_from_binary(binary()) :: [t()]
