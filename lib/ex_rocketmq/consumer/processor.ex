@@ -7,9 +7,24 @@ defmodule ExRocketmq.Consumer.Processor do
   alias ExRocketmq.Typespecs
 
   @type t :: struct()
+
+  @typedoc """
+  concurrent consume result must be one of:
+    - :success
+    - {:retry_later, %{msg_id => delay_level}}
+
+  rocketmq provide 18 delay_level: 1s 5s 10s 30s 1m 2m 3m 4m 5m 6m 7m 8m 9m 10m 20m 30m 1h 2h
+  delay_level=1 means 1s, delay_level=2 means 5s and so on.
+  """
   @type concurrent_consume_result ::
-          :success | {:retry_later, Typespecs.delay_level()}
-  @type orderly_consume_result :: :commit | :rollback | :suspend
+          :success | {:retry_later, %{Typespecs.msg_id() => Typespecs.delay_level()}}
+  @typedoc """
+  orderly consume result must be one of:
+    - :success
+    - {:suspend, suspend_milliseconds}
+  """
+  @type orderly_consume_result ::
+          :success | {:suspend, non_neg_integer()}
 
   @type consume_result :: concurrent_consume_result() | orderly_consume_result()
 

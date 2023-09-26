@@ -398,7 +398,7 @@ defmodule ExRocketmq.Consumer do
   end
 
   def handle_info(:rebalance, state) do
-    Process.send_after(self(), :rebalance, 30_000)
+    Process.send_after(self(), :rebalance, 20_000)
     {:noreply, do_balance(state)}
   end
 
@@ -859,58 +859,20 @@ defmodule ExRocketmq.Consumer do
     |> Enum.chunk_every(batch)
     |> Enum.map(fn msgs ->
       Task.async(fn ->
-        process_with_retry(
-          msgs,
-          processor,
-          topic,
-          bd,
-          group,
-          registry,
-          dynamic_supervisor
-        )
+        Processor.process(processor, topic, msgs)
+        |> case do
+          :success ->
+            :ok
+
+          {:retry_later, delay_level_map} ->
+            # send msg back
+            msgs
+            |> Enum.map(&%{&1 | delay_level: Map.get(delay_level_map, &1.msg_id, 1)})
+            |> send_msgs_back(bd, group, registry, dynamic_supervisor)
+        end
       end)
     end)
     |> Task.await_many()
-  end
-
-  defp process_with_retry(
-         msgs,
-         processor,
-         topic,
-         bd,
-         group,
-         registry,
-         dynamic_supervisor
-       ) do
-    Processor.process(processor, topic, msgs)
-    |> case do
-      :success ->
-        :ok
-
-      {:retry_later, delay_level} ->
-        # send msg back
-        msgs
-        |> Enum.map(&%{&1 | delay_level: delay_level})
-        |> send_msgs_back(bd, group, registry, dynamic_supervisor)
-        |> case do
-          [] ->
-            :ok
-
-          # send back failed, sleep 5s and retry local process
-          failed_msgs ->
-            Process.sleep(5000)
-
-            process_with_retry(
-              failed_msgs,
-              processor,
-              topic,
-              bd,
-              group,
-              registry,
-              dynamic_supervisor
-            )
-        end
-    end
   end
 
   @spec send_msgs_back(
@@ -919,8 +881,9 @@ defmodule ExRocketmq.Consumer do
           Typespecs.group_name(),
           atom(),
           pid()
-        ) ::
-          list(MessageExt.t())
+        ) :: :ok
+  defp send_msgs_back([], _bd, _group, _registry, _dynamic_supervisor), do: :ok
+
   defp send_msgs_back(msgs, bd, group, registry, dynamic_supervisor) do
     broker =
       get_or_new_broker(
@@ -945,13 +908,18 @@ defmodule ExRocketmq.Consumer do
           max_reconsume_times: 16
         })
         |> case do
-          :ok -> nil
-          _ -> msg
+          :ok ->
+            nil
+
+          {:error, reason} ->
+            Logger.error("send msg back error: #{inspect(reason)}")
+            msg
         end
       end)
     end)
     |> Task.await_many()
     |> Enum.filter(&(&1 != nil))
+    |> send_msgs_back(bd, group, registry, dynamic_supervisor)
   end
 
   @spec do_heartbeat(State.t()) :: :ok
