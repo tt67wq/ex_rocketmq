@@ -11,6 +11,9 @@ defmodule ExRocketmq.Models.MsgSelector do
           expression: String.t()
         }
 
+  @spec new(:tag | :sql92, String.t()) :: t()
+  def new(type, expression), do: %__MODULE__{type: type, expression: expression}
+
   @spec tags(t()) :: list(String.t())
   def tags(%__MODULE__{type: :tag, expression: expression}) do
     case expression do
