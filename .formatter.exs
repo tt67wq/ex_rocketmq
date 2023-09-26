@@ -5,7 +5,7 @@ locals_without_parens = [
 ]
 
 [
-  inputs: ["{mix,.formatter}.exs", "{config,lib,test}/**/*.{ex,exs}"],
+  inputs: ["{mix,.formatter}.exs", "{config,lib,test,examples}/**/*.{ex,exs}"],
   locals_without_parens: locals_without_parens,
   export: [
     locals_without_parens: locals_without_parens
