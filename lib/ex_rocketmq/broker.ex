@@ -191,7 +191,7 @@ defmodule ExRocketmq.Broker do
   defp send_with_retry(_, _, _, _, 0), do: {:error, :retry_times_exceeded}
 
   defp send_with_retry(broker, code, body, ext_fields, retry_times) do
-    case GenServer.call(broker, {:rpc, code, body, ext_fields}, 5_000) do
+    case GenServer.call(broker, {:rpc, code, body, ext_fields}, 15_000) do
       {:ok, pkt} ->
         Packet.packet(pkt, :code)
         |> Kernel.in([

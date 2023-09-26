@@ -497,7 +497,7 @@ defmodule ExRocketmq.Consumer do
             |> Map.reject(fn {mq, _pid} -> Enum.member?(allocated_mqs, mq) end)
             |> tap(fn to_stop ->
               Enum.each(to_stop, fn {mq, pid} ->
-                Logger.info("stop consume task: #{inspect(mq)}")
+                Logger.warning("stop consume task: #{inspect(mq)}")
                 Task.Supervisor.terminate_child(task_supervisor, pid)
               end)
             end)
