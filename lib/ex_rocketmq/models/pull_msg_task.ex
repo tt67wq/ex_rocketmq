@@ -1,4 +1,4 @@
-defmodule ExRocketmq.Models.PullMsgTask do
+defmodule ExRocketmq.Models.ConsumeState do
   @moduledoc false
 
   alias ExRocketmq.Models.{

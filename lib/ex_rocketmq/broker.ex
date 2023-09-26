@@ -25,6 +25,8 @@ defmodule ExRocketmq.Broker do
 
   alias ExRocketmq.{
     Typespecs,
+    Util,
+    Transport,
     Remote,
     Remote.Packet,
     Remote.ExtFields,
@@ -99,6 +101,33 @@ defmodule ExRocketmq.Broker do
   ]
 
   @type namesrvs_opts_schema_t :: [unquote(NimbleOptions.option_typespec(@broker_opts_schema))]
+
+  @spec get_or_new_broker(Typespecs.broker_name(), String.t(), atom(), pid()) :: pid()
+  def get_or_new_broker(broker_name, addr, registry, dynamic_supervisor) do
+    Registry.lookup(registry, addr)
+    |> case do
+      [] ->
+        {host, port} =
+          addr
+          |> Util.Network.parse_addr()
+
+        broker_opts = [
+          broker_name: broker_name,
+          remote_opts: [transport: Transport.Tcp.new(host: host, port: port)],
+          opts: [name: {:via, Registry, {registry, addr}}]
+        ]
+
+        {:ok, pid} = DynamicSupervisor.start_child(dynamic_supervisor, {Broker, broker_opts})
+
+        # bind self to broker, then notify from broker will send to self
+        controlling_process(pid, self())
+
+        pid
+
+      [{pid, _}] ->
+        pid
+    end
+  end
 
   @spec start_link(namesrvs_opts_schema_t()) :: Typespecs.on_start()
   def start_link(opts) do

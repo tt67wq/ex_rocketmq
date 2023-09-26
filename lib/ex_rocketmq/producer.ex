@@ -41,7 +41,6 @@ defmodule ExRocketmq.Producer do
     Typespecs,
     Namesrvs,
     Util,
-    Transport,
     Broker,
     Producer.MqSelector,
     Compressor,
@@ -340,7 +339,7 @@ defmodule ExRocketmq.Producer do
          {:ok, {broker_datas, _mqs}} <- Map.fetch(pmap, msg.topic),
          {:ok, %BrokerData{} = bd} <- get_broker_data(broker_datas, q),
          broker_pid <-
-           get_or_new_broker(
+           Broker.get_or_new_broker(
              bd.broker_name,
              BrokerData.master_addr(bd),
              registry,
@@ -520,7 +519,7 @@ defmodule ExRocketmq.Producer do
          },
          {:ok, bd} <- get_broker_data(broker_datas, mq),
          broker_pid <-
-           get_or_new_broker(
+           Broker.get_or_new_broker(
              bd.broker_name,
              BrokerData.master_addr(bd),
              registry,
@@ -594,34 +593,6 @@ defmodule ExRocketmq.Producer do
   end
 
   defp encode_batch([msg]), do: msg
-
-  @spec get_or_new_broker(String.t(), String.t(), atom(), pid()) :: pid()
-  defp get_or_new_broker(broker_name, addr, registry, broker_dynamic_supervisor) do
-    Registry.lookup(registry, addr)
-    |> case do
-      [] ->
-        {host, port} =
-          addr
-          |> Util.Network.parse_addr()
-
-        broker_opts = [
-          broker_name: broker_name,
-          remote_opts: [transport: Transport.Tcp.new(host: host, port: port)],
-          opts: [name: {:via, Registry, {registry, addr}}]
-        ]
-
-        {:ok, pid} =
-          DynamicSupervisor.start_child(broker_dynamic_supervisor, {Broker, broker_opts})
-
-        # bind self to broker, then notify from broker will send to self
-        Broker.controlling_process(pid, self())
-
-        pid
-
-      [{pid, _}] ->
-        pid
-    end
-  end
 
   @spec set_uniqid(Message.t(), pid()) :: Message.t()
   defp set_uniqid(%Message{batch: false, properties: properties} = msg, uniqid) do
