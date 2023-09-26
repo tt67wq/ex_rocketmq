@@ -106,7 +106,7 @@ Supervisor.start_link(
      ]},
     {
       Producer,
-      group_name: "GID_WANQIANG",
+      group_name: "GID_POETRY",
       namesrvs: :namesrvs,
       opts: [
         name: :producer
