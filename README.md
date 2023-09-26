@@ -199,6 +199,8 @@ Supervisor.start_link(
 Process.sleep(:infinity)
 ```
 
+More examples can be found in [examples](https://github.com/tt67wq/ex_rocketmq/tree/master/examples)
+
 ## Roadmap
 - [X] Support transactional message producer;
 - [ ] Support orderly message consume;
