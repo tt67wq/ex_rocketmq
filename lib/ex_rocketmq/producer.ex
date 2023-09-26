@@ -160,7 +160,7 @@ defmodule ExRocketmq.Producer do
 
   @type producer_opts_schema_t :: [unquote(NimbleOptions.option_typespec(@producer_opts_schema))]
   @type publish_map :: %{
-          Typespecs.topic() => {list(Models.BrokerData.t()), list(Models.MessageQueue.t())}
+          Typespecs.topic() => {list(BrokerData.t()), list(MessageQueue.t())}
         }
 
   @spec start_link(producer_opts_schema_t()) :: Typespecs.on_start()
@@ -437,10 +437,22 @@ defmodule ExRocketmq.Producer do
 
   # ------- private funcs ------
 
+  @spec notify_check_transaction_state(
+          Packet.t(),
+          ExRocketmq.Producer.Transaction.t(),
+          Typespecs.group_name(),
+          pid()
+        ) :: :ok
   defp notify_check_transaction_state(pkt, transaction_listener, group_name, broker_pid) do
-    header = CheckTransactionState.decode(Packet.packet(pkt, :ext_fields))
+    header =
+      pkt
+      |> Packet.packet(:ext_fields)
+      |> CheckTransactionState.decode()
 
-    [msg_ext] = MessageExt.decode_from_binary(Packet.packet(pkt, :body))
+    [msg_ext] =
+      pkt
+      |> Packet.packet(:body)
+      |> MessageExt.decode_from_binary()
 
     msg_ext = %MessageExt{
       msg_ext

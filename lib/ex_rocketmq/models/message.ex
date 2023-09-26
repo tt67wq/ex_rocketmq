@@ -96,22 +96,6 @@ defmodule ExRocketmq.Models.MessageExt do
   @flag_compressed Flag.flag_compressed()
   @property_unique_client_msgid_key Properties.property_unique_client_msgid_key()
 
-  defstruct message: %Message{},
-            msg_id: "",
-            offset_msg_id: "",
-            store_size: 0,
-            queue_offset: 0,
-            sys_flag: 0,
-            born_timestamp: 0,
-            born_host: "",
-            store_timestamp: 0,
-            store_host: "",
-            commit_log_offset: 0,
-            body_crc: 0,
-            reconsume_times: 0,
-            prepared_transaction_offset: 0,
-            delay_level: 0
-
   @type t :: %__MODULE__{
           message: Message.t(),
           msg_id: String.t(),
@@ -129,6 +113,22 @@ defmodule ExRocketmq.Models.MessageExt do
           prepared_transaction_offset: non_neg_integer(),
           delay_level: Typespecs.delay_level()
         }
+
+  defstruct message: %Message{},
+            msg_id: "",
+            offset_msg_id: "",
+            store_size: 0,
+            queue_offset: 0,
+            sys_flag: 0,
+            born_timestamp: 0,
+            born_host: "",
+            store_timestamp: 0,
+            store_host: "",
+            commit_log_offset: 0,
+            body_crc: 0,
+            reconsume_times: 0,
+            prepared_transaction_offset: 0,
+            delay_level: 0
 
   @spec decode_from_binary(binary()) :: [t()]
   def decode_from_binary(body), do: decode_one(body, [])
