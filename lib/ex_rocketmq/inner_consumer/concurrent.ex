@@ -64,7 +64,12 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
 
     Logger.info("mq #{topic}-#{queue_id}'s next offset: #{inspect(offset)}")
 
-    pull_msg(%{task | next_offset: offset})
+    pull_msg(%{
+      task
+      | next_offset: offset,
+        commit_offset: offset,
+        commit_offset_enable: offset > 0
+    })
   end
 
   def pull_msg(
@@ -110,27 +115,30 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
       expression_type: expression_type
     }
 
-    broker =
-      Broker.get_or_new_broker(
-        bd.broker_name,
-        BrokerData.master_addr(bd),
-        registry,
-        dynamic_supervisor
-      )
+    Util.Debug.debug(pull_req)
 
-    # if commit_offset_enable do
-    #   BrokerData.master_addr(bd)
-    # else
-    #   BrokerData.slave_addr(bd)
-    # end
-    # |> then(fn addr ->
+    # broker =
     #   Broker.get_or_new_broker(
     #     bd.broker_name,
-    #     addr,
+    #     BrokerData.master_addr(bd),
     #     registry,
     #     dynamic_supervisor
     #   )
-    # end)
+
+    broker =
+      if commit_offset_enable do
+        BrokerData.master_addr(bd)
+      else
+        BrokerData.slave_addr(bd)
+      end
+      |> then(fn addr ->
+        Broker.get_or_new_broker(
+          bd.broker_name,
+          addr,
+          registry,
+          dynamic_supervisor
+        )
+      end)
 
     with {:ok,
           %PullMsg.Response{

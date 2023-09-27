@@ -228,7 +228,7 @@ defmodule ExRocketmq.Broker do
     ext_fields = ExtFields.to_map(req)
 
     with {:ok, pkt} <-
-           GenServer.call(broker, {:rpc, @req_pull_message, <<>>, ext_fields}, 10_000),
+           GenServer.call(broker, {:rpc, @req_pull_message, <<>>, ext_fields, 31_000}, 50_000),
          :ok <-
            do_assert(
              fn ->
@@ -336,8 +336,7 @@ defmodule ExRocketmq.Broker do
          {:ok, pkt} <-
            GenServer.call(
              broker,
-             {:rpc, @req_get_consumer_list_by_group, <<>>, ext_field},
-             15_000
+             {:rpc, @req_get_consumer_list_by_group, <<>>, ext_field}
            ),
          :ok <-
            do_assert(
@@ -404,7 +403,7 @@ defmodule ExRocketmq.Broker do
   end
 
   def handle_call(
-        {:rpc, code, body, ext_fields},
+        {:rpc, code, body, ext_fields, rpc_timeout},
         _from,
         %{remote: remote, opaque: opaque} = state
       ) do
@@ -418,9 +417,17 @@ defmodule ExRocketmq.Broker do
 
     reply =
       remote
-      |> Remote.rpc(pkt)
+      |> Remote.rpc(pkt, rpc_timeout)
 
     {:reply, reply, %{state | opaque: opaque + 1}}
+  end
+
+  def handle_call(
+        {:rpc, code, body, ext_fields},
+        from,
+        state
+      ) do
+    handle_call({:rpc, code, body, ext_fields, 5000}, from, state)
   end
 
   def handle_call(:broker_name, _, %{broker_name: broker_name} = state),
