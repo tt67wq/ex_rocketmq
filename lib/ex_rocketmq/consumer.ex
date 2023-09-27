@@ -165,9 +165,6 @@ defmodule ExRocketmq.Consumer do
   ]
 
   @req_notify_consumer_ids_changed Request.req_notify_consumer_ids_changed()
-  @pull_status_found PullStatus.pull_found()
-  @pull_status_no_new_msg PullStatus.pull_no_new_msg()
-  @pull_status_no_matched_msg PullStatus.pull_no_matched_msg()
 
   @type consumer_opts_schema_t :: [unquote(NimbleOptions.option_typespec(@consumer_opts_schema))]
 
@@ -269,14 +266,14 @@ defmodule ExRocketmq.Consumer do
       expression_type: "TAG"
     }
 
-    Process.send_after(self(), :heartbeat, 1_000)
     Process.send_after(self(), :update_route_info, 1000)
-    Process.send_after(self(), :rebalance, 5000)
+    Process.send_after(self(), :heartbeat, 2000)
+    Process.send_after(self(), :rebalance, 10000)
     {:noreply, %State{state | consume_info_map: Map.put(cmap, topic, {sub, [], [], %{}})}}
   end
 
   def handle_continue(:on_start, state) do
-    Process.send_after(self(), :heartbeat, 1_000)
+    Process.send_after(self(), :heartbeat, 1000)
     Process.send_after(self(), :update_route_info, 1000)
     {:noreply, state}
   end
@@ -365,8 +362,19 @@ defmodule ExRocketmq.Consumer do
       |> Enum.reduce_while(%{}, fn {topic, {sub, _, _, consume_tasks} = old}, acc ->
         case fetch_consume_info(namesrvs, topic) do
           {:ok, {broker_datas, mqs}} ->
-            # RETHINK: should we check if the consume info changed and do rebalance?
             Logger.debug("fetch consume info for topic: #{topic}, mqs: #{inspect(mqs)}")
+            # establish connection to new broker
+            broker_datas
+            |> Task.async_stream(fn bd ->
+              Broker.get_or_new_broker(
+                bd.broker_name,
+                BrokerData.master_addr(bd),
+                state.registry,
+                state.broker_dynamic_supervisor
+              )
+            end)
+            |> Stream.run()
+
             {:cont, Map.put(acc, topic, {sub, broker_datas, mqs, consume_tasks})}
 
           {:error, reason} ->
@@ -391,8 +399,9 @@ defmodule ExRocketmq.Consumer do
   end
 
   def handle_info(:rebalance, state) do
+    state = do_balance(state)
     Process.send_after(self(), :rebalance, 20_000)
-    {:noreply, do_balance(state)}
+    {:noreply, state}
   end
 
   def handle_info(
@@ -534,7 +543,8 @@ defmodule ExRocketmq.Consumer do
                       commit_offset: 0,
                       pull_batch_size: pull_batch_size,
                       consume_batch_size: consume_batch_size,
-                      next_offset: 0,
+                      # use a negative number to indicate that we need to get remote offset
+                      next_offset: -1,
                       processor: processor
                     })
                   end,
@@ -577,6 +587,8 @@ defmodule ExRocketmq.Consumer do
            consume_from_where: cfw
          }
        }) do
+    Logger.debug("do heartbeat")
+
     heartbeat_data = %Heartbeat{
       client_id: cid,
       consumer_data_set: [
@@ -594,7 +606,17 @@ defmodule ExRocketmq.Consumer do
     broker_dynamic_supervisor
     |> Util.SupervisorHelper.all_pids_under_supervisor()
     |> Task.async_stream(fn pid ->
-      Task.async(fn -> Broker.heartbeat(pid, heartbeat_data) end)
+      Task.async(fn ->
+        Broker.heartbeat(pid, heartbeat_data)
+        |> case do
+          :ok ->
+            :ok
+
+          {:error, reason} = err ->
+            Logger.error("heartbeat error: #{inspect(reason)}")
+            err
+        end
+      end)
     end)
     |> Stream.run()
   end

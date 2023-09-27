@@ -1,5 +1,6 @@
 Mix.install([
-  {:ex_rocketmq, github: "tt67wq/ex_rocketmq", branch: "master"}
+  # {:ex_rocketmq, github: "tt67wq/ex_rocketmq", branch: "master"}
+  {:ex_rocketmq, path: "../ex_rocketmq"}
 ])
 
 alias ExRocketmq.{Consumer, Namesrvs, Transport, Models.MsgSelector}

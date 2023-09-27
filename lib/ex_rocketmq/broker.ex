@@ -117,7 +117,7 @@ defmodule ExRocketmq.Broker do
           opts: [name: {:via, Registry, {registry, addr}}]
         ]
 
-        {:ok, pid} = DynamicSupervisor.start_child(dynamic_supervisor, {Broker, broker_opts})
+        {:ok, pid} = DynamicSupervisor.start_child(dynamic_supervisor, {__MODULE__, broker_opts})
 
         # bind self to broker, then notify from broker will send to self
         controlling_process(pid, self())
@@ -150,15 +150,15 @@ defmodule ExRocketmq.Broker do
 
   @spec heartbeat(pid(), Heartbeat.t()) :: :ok | Typespecs.error_t()
   def heartbeat(broker, heartbeat) do
-    with {:ok, body} = Heartbeat.encode(heartbeat),
-         {:ok, pkt} <- GenServer.call(broker, {:rpc, @req_hearbeat, body, %{}}),
+    {:ok, body} = Heartbeat.encode(heartbeat)
+
+    with {:ok, pkt} <- GenServer.call(broker, {:rpc, @req_hearbeat, body, %{}}),
          :ok <-
            do_assert(
              fn -> Packet.packet(pkt, :code) == @resp_success end,
              %{code: Packet.packet(pkt, :code), remark: Packet.packet(pkt, :remark)}
            ) do
       GenServer.cast(broker, {:set_version, Packet.packet(pkt, :version)})
-      :ok
     end
   end
 
@@ -191,7 +191,7 @@ defmodule ExRocketmq.Broker do
   defp send_with_retry(_, _, _, _, 0), do: {:error, :retry_times_exceeded}
 
   defp send_with_retry(broker, code, body, ext_fields, retry_times) do
-    case GenServer.call(broker, {:rpc, code, body, ext_fields}, 15_000) do
+    case GenServer.call(broker, {:rpc, code, body, ext_fields}) do
       {:ok, pkt} ->
         Packet.packet(pkt, :code)
         |> Kernel.in([
@@ -227,7 +227,8 @@ defmodule ExRocketmq.Broker do
   def pull_message(broker, req) do
     ext_fields = ExtFields.to_map(req)
 
-    with {:ok, pkt} <- GenServer.call(broker, {:rpc, @req_pull_message, <<>>, ext_fields}),
+    with {:ok, pkt} <-
+           GenServer.call(broker, {:rpc, @req_pull_message, <<>>, ext_fields}, 10_000),
          :ok <-
            do_assert(
              fn ->
@@ -333,7 +334,11 @@ defmodule ExRocketmq.Broker do
   def get_consumer_list_by_group(broker, group) do
     with ext_field = %{"consumerGroup" => group},
          {:ok, pkt} <-
-           GenServer.call(broker, {:rpc, @req_get_consumer_list_by_group, <<>>, ext_field}),
+           GenServer.call(
+             broker,
+             {:rpc, @req_get_consumer_list_by_group, <<>>, ext_field},
+             15_000
+           ),
          :ok <-
            do_assert(
              fn -> Packet.packet(pkt, :code) == @resp_success end,
@@ -464,6 +469,11 @@ defmodule ExRocketmq.Broker do
     end
 
     Process.send_after(self(), :pop_notify, 1000)
+    {:noreply, state}
+  end
+
+  def handle_info(:timeout, state) do
+    Logger.warning("broker timeout")
     {:noreply, state}
   end
 

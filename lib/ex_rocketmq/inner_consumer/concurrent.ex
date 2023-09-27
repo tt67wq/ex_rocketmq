@@ -20,7 +20,8 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
     GetMaxOffset,
     SearchOffset,
     PullMsg,
-    ConsumerSendMsgBack
+    ConsumerSendMsgBack,
+    MessageExt
   }
 
   require PullStatus
@@ -40,7 +41,7 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
           mq: %MessageQueue{
             queue_id: queue_id
           },
-          next_offset: 0,
+          next_offset: -1,
           consume_from_where: cfw,
           consume_timestamp: consume_timestamp
         } = task
@@ -60,6 +61,8 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
         cfw,
         consume_timestamp
       )
+
+    Logger.info("mq #{topic}-#{queue_id}'s next offset: #{inspect(offset)}")
 
     pull_msg(%{task | next_offset: offset})
   end
@@ -89,42 +92,45 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
           processor: processor
         } = pt
       ) do
-    sub_expression =
-      if post_subscription_when_pull and not cfm do
-        sub_string
-      else
-        ""
-      end
-
     pull_req = %PullMsg.Request{
       consumer_group: group_name,
       topic: topic,
       queue_id: queue_id,
       queue_offset: next_offset,
       max_msg_nums: pull_batch_size,
-      sys_flag: build_pullmsg_sys_flag(commit_offset_enable, sub_expression, cfm),
+      sys_flag:
+        build_pullmsg_sys_flag(
+          commit_offset_enable,
+          post_subscription_when_pull and cfm,
+          cfm
+        ),
       commit_offset: commit_offset,
       suspend_timeout_millis: 20_000,
-      sub_expression: sub_expression,
+      sub_expression: sub_string,
       expression_type: expression_type
     }
 
-    # Util.Debug.debug("pull msg: #{inspect(pull_req)}")
-
     broker =
-      if commit_offset_enable do
-        BrokerData.master_addr(bd)
-      else
-        BrokerData.slave_addr(bd)
-      end
-      |> then(fn addr ->
-        Broker.get_or_new_broker(
-          bd.broker_name,
-          addr,
-          registry,
-          dynamic_supervisor
-        )
-      end)
+      Broker.get_or_new_broker(
+        bd.broker_name,
+        BrokerData.master_addr(bd),
+        registry,
+        dynamic_supervisor
+      )
+
+    # if commit_offset_enable do
+    #   BrokerData.master_addr(bd)
+    # else
+    #   BrokerData.slave_addr(bd)
+    # end
+    # |> then(fn addr ->
+    #   Broker.get_or_new_broker(
+    #     bd.broker_name,
+    #     addr,
+    #     registry,
+    #     dynamic_supervisor
+    #   )
+    # end)
 
     with {:ok,
           %PullMsg.Response{
@@ -196,6 +202,7 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
       if last_offset > 0 do
         {:ok, last_offset}
       else
+        Logger.warning("no offset record for mq #{topic}-#{queue_id}")
         # no offset record
         case cfw do
           :last_offset ->
@@ -255,12 +262,12 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
   @spec retry_topic?(Typespecs.topic()) :: boolean()
   defp retry_topic?(topic), do: String.starts_with?(topic, "%RETRY%")
 
-  @spec build_pullmsg_sys_flag(boolean(), String.t(), boolean()) :: non_neg_integer()
-  defp build_pullmsg_sys_flag(commit_offset_enable, sub_expression, class_filter_mode) do
+  @spec build_pullmsg_sys_flag(boolean(), boolean(), boolean()) :: non_neg_integer()
+  defp build_pullmsg_sys_flag(commit_offset_enable, subscription, class_filter_mode) do
     0
     |> Util.BitHelper.set_bit(0, commit_offset_enable)
-    |> Bitwise.band(2)
-    |> Util.BitHelper.set_bit(2, sub_expression != "")
+    |> Bitwise.bor(2)
+    |> Util.BitHelper.set_bit(2, subscription)
     |> Util.BitHelper.set_bit(3, class_filter_mode)
   end
 

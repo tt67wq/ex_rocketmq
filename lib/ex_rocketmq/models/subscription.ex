@@ -5,11 +5,11 @@ defmodule ExRocketmq.Models.Subscription do
 
   defstruct class_filter_mode: false,
             topic: "",
-            sub_string: "",
+            sub_string: "*",
             tags_set: [],
             code_set: [],
             sub_version: 0,
-            expression_type: ""
+            expression_type: "TAG"
 
   @type t :: %__MODULE__{
           class_filter_mode: boolean(),

@@ -38,7 +38,7 @@ defmodule ExRocketmq.Models.ConsumeState do
           consume_timestamp: non_neg_integer(),
           consume_orderly: boolean(),
           subscription: Subscription.t(),
-          next_offset: non_neg_integer(),
+          next_offset: integer(),
           commit_offset_enable: boolean(),
           commit_offset: non_neg_integer(),
           post_subscription_when_pull: boolean(),

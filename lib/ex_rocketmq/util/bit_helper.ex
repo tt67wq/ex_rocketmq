@@ -7,7 +7,7 @@ defmodule ExRocketmq.Util.BitHelper do
   def set_bit(flag, offset, condition) do
     if condition do
       flag
-      |> Bitwise.band(Bitwise.bsl(1, offset))
+      |> Bitwise.bor(Bitwise.bsl(1, offset))
     else
       flag
     end
@@ -16,7 +16,7 @@ defmodule ExRocketmq.Util.BitHelper do
   def unset_bit(flag, offset, condition) do
     if condition do
       flag
-      |> Bitwise.band(Bitwise.bsl(-2, offset))
+      |> Bitwise.bor(Bitwise.bsl(-2, offset))
     else
       flag
     end
