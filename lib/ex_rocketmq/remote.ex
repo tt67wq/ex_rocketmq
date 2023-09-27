@@ -46,7 +46,18 @@ defmodule ExRocketmq.Remote do
       iex> {:ok, _res} = ExRocketmq.Remote.rpc(remote, msg)
   """
   @spec rpc(pid(), Packet.t(), non_neg_integer()) :: {:ok, Packet.t()} | {:error, any()}
-  def rpc(remote, pkt, timeout \\ 30_000), do: GenServer.call(remote, {:rpc, pkt}, timeout)
+  def rpc(remote, pkt, timeout \\ 30_000) do
+    try do
+      GenServer.call(remote, {:rpc, pkt}, timeout)
+    catch
+      :exit, {:timeout, _} ->
+        {:error, :timeout}
+
+      :exit, reason ->
+        Logger.error("remote rpc error: #{inspect(reason)}")
+        exit(reason)
+    end
+  end
 
   @doc """
   send msg to the remote server, and don't wait for the response

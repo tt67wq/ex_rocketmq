@@ -119,36 +119,26 @@ defmodule BrokerTest do
              )
   end
 
+  @tag mustexec: true
   test "pull_message", %{broker: broker, topic: topic, group: group} do
-    assert {:ok, offset} =
-             Broker.query_consumer_offset(
-               broker,
-               %Models.QueryConsumerOffset{
-                 consumer_group: group,
-                 topic: topic,
-                 queue_id: 1
-               }
-             )
-
     assert {:ok, _} =
              Broker.pull_message(
                broker,
                %Models.PullMsg.Request{
                  consumer_group: group,
                  topic: topic,
-                 queue_id: 1,
-                 queue_offset: offset - 5,
-                 max_msg_nums: 5,
-                 sys_flag: 0,
+                 queue_id: 0,
+                 queue_offset: 0,
+                 max_msg_nums: 32,
+                 sys_flag: 2,
                  commit_offset: 0,
-                 suspend_timeout_millis: 0,
+                 suspend_timeout_millis: 20000,
                  sub_expression: "*",
                  sub_version: 0,
                  expression_type: "TAG"
                }
              )
-
-    #  |> Debug.debug()
+             |> Debug.debug()
   end
 
   test "search_offset_by_timestamp", %{broker: broker, topic: topic} do

@@ -49,7 +49,8 @@ defmodule ExRocketmq.Models.PullMsg do
         "suspendTimeoutMillis" => "#{t.suspend_timeout_millis}",
         "subscription" => t.sub_expression,
         "subVersion" => "#{t.sub_version}",
-        "expressionType" => "#{t.expression_type}"
+        "expressionType" => "#{t.expression_type}",
+        "supportCompressionType" => "1"
       }
     end
   end

@@ -115,15 +115,9 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
       expression_type: expression_type
     }
 
-    Util.Debug.debug(pull_req)
-
-    # broker =
-    #   Broker.get_or_new_broker(
-    #     bd.broker_name,
-    #     BrokerData.master_addr(bd),
-    #     registry,
-    #     dynamic_supervisor
-    #   )
+    if retry_topic?(topic) do
+      Util.Debug.debug(pull_req)
+    end
 
     broker =
       if commit_offset_enable do
@@ -175,17 +169,20 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
           pull_msg(pt)
 
         status ->
-          Logger.critical("pull message error: #{inspect(status)}, terminate pull task")
+          Logger.error("pull message error: #{inspect(status)}, terminate pull task")
           :stop
       end
     else
       {:error, reason} ->
-        Logger.error("pull message error: #{inspect(reason)}")
+        Logger.error(
+          "pull message error: #{inspect(reason)}, topic: #{topic}, queue: #{queue_id}"
+        )
+
         Process.sleep(1000)
         pull_msg(pt)
 
       other ->
-        Logger.error("pull message error: #{inspect(other)}")
+        Logger.error("pull message error: #{inspect(other)}, topic: #{topic}, queue: #{queue_id}")
         Process.sleep(1000)
         pull_msg(pt)
     end

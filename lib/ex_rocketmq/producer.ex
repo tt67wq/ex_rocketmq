@@ -424,10 +424,10 @@ defmodule ExRocketmq.Producer do
 
     broker_dynamic_supervisor
     |> Util.SupervisorHelper.all_pids_under_supervisor()
-    |> Enum.map(fn pid ->
-      Task.async(fn -> Broker.heartbeat(pid, heartbeat_data) end)
+    |> Task.async_stream(fn pid ->
+      Broker.heartbeat(pid, heartbeat_data)
     end)
-    |> Task.await_many()
+    |> Stream.run()
 
     Process.send_after(self(), :heartbeat, 30_000)
 

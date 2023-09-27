@@ -11,7 +11,9 @@ defmodule ExRocketmq.Broker do
       :remote,
       :opaque,
       :version,
-      :controlling_process
+      :controlling_process,
+      :task_supervisor,
+      :task_ref
     ]
 
     @type t :: %__MODULE__{
@@ -19,7 +21,9 @@ defmodule ExRocketmq.Broker do
             remote: pid(),
             opaque: non_neg_integer(),
             version: non_neg_integer(),
-            controlling_process: pid()
+            controlling_process: pid(),
+            task_supervisor: pid() | atom(),
+            task_ref: %{}
           }
   end
 
@@ -107,6 +111,8 @@ defmodule ExRocketmq.Broker do
     Registry.lookup(registry, addr)
     |> case do
       [] ->
+        Logger.debug("estabilish new broker connection: #{broker_name}, #{addr}}")
+
         {host, port} =
           addr
           |> Util.Network.parse_addr()
@@ -228,7 +234,7 @@ defmodule ExRocketmq.Broker do
     ext_fields = ExtFields.to_map(req)
 
     with {:ok, pkt} <-
-           GenServer.call(broker, {:rpc, @req_pull_message, <<>>, ext_fields, 31_000}, 50_000),
+           GenServer.call(broker, {:rpc, @req_pull_message, <<>>, ext_fields, 25_000}, 30_000),
          :ok <-
            do_assert(
              fn ->
@@ -387,13 +393,17 @@ defmodule ExRocketmq.Broker do
   def init(opts) do
     {:ok, remote_pid} = Remote.start_link(opts[:remote_opts])
 
+    {:ok, task_supervisor} = Task.Supervisor.start_link()
+
     {:ok,
      %State{
        broker_name: opts[:broker_name],
        remote: remote_pid,
        opaque: 0,
        version: 0,
-       controlling_process: nil
+       controlling_process: nil,
+       task_supervisor: task_supervisor,
+       task_ref: %{}
      }, {:continue, :on_start}}
   end
 
@@ -404,8 +414,9 @@ defmodule ExRocketmq.Broker do
 
   def handle_call(
         {:rpc, code, body, ext_fields, rpc_timeout},
-        _from,
-        %{remote: remote, opaque: opaque} = state
+        from,
+        %{remote: remote, opaque: opaque, task_supervisor: task_supervisor, task_ref: task_ref} =
+          state
       ) do
     pkt =
       Packet.packet(
@@ -415,11 +426,12 @@ defmodule ExRocketmq.Broker do
         body: body
       )
 
-    reply =
-      remote
-      |> Remote.rpc(pkt, rpc_timeout)
+    task =
+      Task.Supervisor.async_nolink(task_supervisor, fn ->
+        Remote.rpc(remote, pkt, rpc_timeout)
+      end)
 
-    {:reply, reply, %{state | opaque: opaque + 1}}
+    {:noreply, %{state | opaque: opaque + 1, task_ref: Map.put(task_ref, task.ref, from)}}
   end
 
   def handle_call(
@@ -437,9 +449,12 @@ defmodule ExRocketmq.Broker do
     {:noreply, %{state | controlling_process: pid}}
   end
 
-  def handle_cast({:set_version, version}, %{version: old_version} = state) do
+  def handle_cast(
+        {:set_version, version},
+        %{version: old_version, broker_name: broker_name} = state
+      ) do
     if version != old_version do
-      Logger.info("Broker version changed from #{old_version} to #{version}")
+      Logger.info("Broker #{broker_name} version changed from #{old_version} to #{version}")
       {:noreply, %{state | version: version}}
     else
       {:noreply, state}
@@ -482,6 +497,37 @@ defmodule ExRocketmq.Broker do
   def handle_info(:timeout, state) do
     Logger.warning("broker timeout")
     {:noreply, state}
+  end
+
+  # The rpc task completed successfully
+  def handle_info({ref, rpc_result}, %{task_ref: task_ref} = state) do
+    # We don't care about the DOWN message now, so let's demonitor and flush it
+    Process.demonitor(ref, [:flush])
+
+    Map.pop(task_ref, ref)
+    |> case do
+      {nil, _} ->
+        Logger.warning("no task ref found: #{inspect(ref)}")
+        {:noreply, state}
+
+      {from, task_ref} ->
+        GenServer.reply(from, rpc_result)
+        {:noreply, %{state | task_ref: task_ref}}
+    end
+  end
+
+  # The rpc task failed
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{task_ref: task_ref} = state) do
+    Map.pop(task_ref, ref)
+    |> case do
+      {nil, _} ->
+        Logger.warning("no task ref found: #{inspect(ref)}")
+        {:noreply, state}
+
+      {from, task_ref} ->
+        GenServer.reply(from, {:error, reason})
+        {:noreply, %{state | task_ref: task_ref}}
+    end
   end
 
   def terminate(reason, %{remote: remote}) do

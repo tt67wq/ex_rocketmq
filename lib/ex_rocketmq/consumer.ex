@@ -372,6 +372,13 @@ defmodule ExRocketmq.Consumer do
                 state.registry,
                 state.broker_dynamic_supervisor
               )
+
+              Broker.get_or_new_broker(
+                bd.broker_name,
+                BrokerData.slave_addr(bd),
+                state.registry,
+                state.broker_dynamic_supervisor
+              )
             end)
             |> Stream.run()
 
@@ -606,17 +613,17 @@ defmodule ExRocketmq.Consumer do
     broker_dynamic_supervisor
     |> Util.SupervisorHelper.all_pids_under_supervisor()
     |> Task.async_stream(fn pid ->
-      Task.async(fn ->
-        Broker.heartbeat(pid, heartbeat_data)
-        |> case do
-          :ok ->
-            :ok
+      # Logger.debug("send heartbeat to broker: #{inspect(pid)}")
 
-          {:error, reason} = err ->
-            Logger.error("heartbeat error: #{inspect(reason)}")
-            err
-        end
-      end)
+      Broker.heartbeat(pid, heartbeat_data)
+      |> case do
+        :ok ->
+          :ok
+
+        {:error, reason} = err ->
+          Logger.error("heartbeat error: #{inspect(reason)}")
+          err
+      end
     end)
     |> Stream.run()
   end
