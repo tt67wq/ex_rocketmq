@@ -246,9 +246,8 @@ defmodule ExRocketmq.Broker do
                ]
              end,
              %{code: Packet.packet(pkt, :code), remark: Packet.packet(pkt, :remark)}
-           ),
-         {:ok, resp} <- PullMsg.Response.from_pkt(pkt) do
-      {:ok, resp}
+           ) do
+      PullMsg.Response.from_pkt(pkt)
     end
   end
 
@@ -323,23 +322,28 @@ defmodule ExRocketmq.Broker do
   @spec consumer_send_msg_back(pid(), ConsumerSendMsgBack.t()) ::
           :ok | Typespecs.error_t()
   def consumer_send_msg_back(broker, req) do
-    with ext_fields = ExtFields.to_map(req),
-         {:ok, pkt} <-
-           GenServer.call(broker, {:rpc, @req_consumer_send_msg_back, <<>>, ext_fields}),
-         :ok <-
-           do_assert(
-             fn -> Packet.packet(pkt, :code) == @resp_success end,
-             %{code: Packet.packet(pkt, :code), remark: Packet.packet(pkt, :remark)}
-           ) do
-      :ok
+    ext_fields = ExtFields.to_map(req)
+
+    GenServer.call(broker, {:rpc, @req_consumer_send_msg_back, <<>>, ext_fields})
+    |> case do
+      {:ok, pkt} ->
+        do_assert(
+          fn -> Packet.packet(pkt, :code) == @resp_success end,
+          %{code: Packet.packet(pkt, :code), remark: Packet.packet(pkt, :remark)}
+        )
+
+      {:error, reason} = error ->
+        Logger.error("consumer_send_msg_back error: #{inspect(reason)}")
+        error
     end
   end
 
   @spec get_consumer_list_by_group(pid(), String.t()) ::
           {:ok, list(String.t())} | Typespecs.error_t()
   def get_consumer_list_by_group(broker, group) do
-    with ext_field = %{"consumerGroup" => group},
-         {:ok, pkt} <-
+    ext_field = %{"consumerGroup" => group}
+
+    with {:ok, pkt} <-
            GenServer.call(
              broker,
              {:rpc, @req_get_consumer_list_by_group, <<>>, ext_field}
@@ -362,8 +366,9 @@ defmodule ExRocketmq.Broker do
 
   @spec lock_batch_mq(pid(), Lock.Req.t()) :: {:ok, Lock.Resp.t()} | Typespecs.error_t()
   def lock_batch_mq(broker, req) do
-    with body = Lock.Req.encode(req),
-         {:ok, pkt} <- GenServer.call(broker, {:rpc, @req_lock_batch_mq, body, %{}}),
+    body = Lock.Req.encode(req)
+
+    with {:ok, pkt} <- GenServer.call(broker, {:rpc, @req_lock_batch_mq, body, %{}}),
          :ok <-
            do_assert(
              fn -> Packet.packet(pkt, :code) == @resp_success end,
@@ -377,14 +382,19 @@ defmodule ExRocketmq.Broker do
 
   @spec unlock_batch_mq(pid(), Lock.Req.t()) :: :ok | Typespecs.error_t()
   def unlock_batch_mq(broker, req) do
-    with body = Lock.Req.encode(req),
-         {:ok, pkt} <- GenServer.call(broker, {:rpc, @req_unlock_batch_mq, body, %{}}),
-         :ok <-
-           do_assert(
-             fn -> Packet.packet(pkt, :code) == @resp_success end,
-             %{code: Packet.packet(pkt, :code), remark: Packet.packet(pkt, :remark)}
-           ) do
-      :ok
+    body = Lock.Req.encode(req)
+
+    GenServer.call(broker, {:rpc, @req_unlock_batch_mq, body, %{}})
+    |> case do
+      {:ok, pkt} ->
+        do_assert(
+          fn -> Packet.packet(pkt, :code) == @resp_success end,
+          %{code: Packet.packet(pkt, :code), remark: Packet.packet(pkt, :remark)}
+        )
+
+      {:error, reason} = error ->
+        Logger.error("unlock_batch_mq error: #{inspect(reason)}")
+        error
     end
   end
 

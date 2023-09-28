@@ -128,7 +128,7 @@ defmodule ExRocketmq.Remote do
       ) do
     {:ok, data} = Serializer.encode(serializer, msg)
     Transport.output(transport, data)
-    Waiter.put(waiter, Packet.packet(msg, :opaque), from, ttl: 5000)
+    Waiter.put(waiter, Packet.packet(msg, :opaque), from, ttl: 60_000)
     {:noreply, state}
   end
 

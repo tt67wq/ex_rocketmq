@@ -460,22 +460,23 @@ defmodule ExRocketmq.Producer do
 
     %MessageExt{message: msg} = msg_ext
 
-    with {:ok, transaction_state} <-
-           ExRocketmq.Producer.Transaction.check_local(transaction_listener, msg_ext),
-         req = %EndTransaction{
-           producer_group: group_name,
-           tran_state_table_offset: header.tran_state_table_offset,
-           commit_log_offset: header.commit_log_offset,
-           commit_or_rollback: transaction_state_to_type(transaction_state),
-           from_transaction_check: true,
-           msg_id: Map.get(msg.properties, @property_unique_client_msgid_key, msg_ext.msg_id),
-           transaction_id:
-             Map.get(msg.properties, @property_transaction_id, header.transaction_id)
-         } do
-      Broker.end_transaction(broker_pid, req)
-    else
-      {:error, reason} -> Logger.error("check transaction state error: #{inspect(reason)}")
-      others -> Logger.error("check transaction state error: #{inspect(others)}")
+    ExRocketmq.Producer.Transaction.check_local(transaction_listener, msg_ext)
+    |> case do
+      {:ok, transaction_state} ->
+        req = %EndTransaction{
+          producer_group: group_name,
+          tran_state_table_offset: header.tran_state_table_offset,
+          commit_log_offset: header.commit_log_offset,
+          commit_or_rollback: transaction_state_to_type(transaction_state),
+          from_transaction_check: true,
+          msg_id: Map.get(msg.properties, @property_unique_client_msgid_key, msg_ext.msg_id),
+          transaction_id: Map.get(msg.properties, @property_transaction_id, header.transaction_id)
+        }
+
+        Broker.end_transaction(broker_pid, req)
+
+      {:error, reason} ->
+        Logger.error("check transaction state error: #{inspect(reason)}")
     end
   end
 
@@ -643,7 +644,7 @@ defmodule ExRocketmq.Producer do
 
   defp set_tranaction_id(msg), do: msg
 
-  @spec get_msg_id(%SendMsg.Response{}) :: {:ok, MessageId.t()} | {:error, any()}
+  @spec get_msg_id(SendMsg.Response.t()) :: {:ok, MessageId.t()} | {:error, any()}
   defp get_msg_id(%SendMsg.Response{offset_msg_id: offset_msg_id}) when offset_msg_id != "",
     do: MessageId.decode(offset_msg_id)
 

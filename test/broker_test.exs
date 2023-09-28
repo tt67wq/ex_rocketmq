@@ -132,7 +132,7 @@ defmodule BrokerTest do
                  max_msg_nums: 32,
                  sys_flag: 2,
                  commit_offset: 0,
-                 suspend_timeout_millis: 20000,
+                 suspend_timeout_millis: 20_000,
                  sub_expression: "*",
                  sub_version: 0,
                  expression_type: "TAG"

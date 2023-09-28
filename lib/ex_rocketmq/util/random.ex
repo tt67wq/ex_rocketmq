@@ -15,8 +15,7 @@ defmodule ExRocketmq.Util.Random do
   def generate_id(prefix) do
     mid =
       1..8
-      |> Enum.map(fn _ -> Enum.random(0..9) end)
-      |> Enum.join()
+      |> Enum.map_join("", fn _ -> Enum.random(0..9) end)
 
     "#{prefix}#{mid}#{gen_reference()}"
   end

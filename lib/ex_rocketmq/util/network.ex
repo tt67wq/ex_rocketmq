@@ -32,8 +32,7 @@ defmodule ExRocketmq.Util.Network do
       g::big-integer-size(16), h::big-integer-size(16)>> = binary
 
     [a, b, c, d, e, f, g, h]
-    |> Enum.map(&Integer.to_string(&1, 16))
-    |> Enum.join(":")
+    |> Enum.map_join(":", &Integer.to_string(&1, 16))
   end
 
   @spec binary_to_ipv4(<<_::32>>) :: String.t()
@@ -42,7 +41,6 @@ defmodule ExRocketmq.Util.Network do
       d::big-integer-size(8)>> = binary
 
     [a, b, c, d]
-    |> Enum.map(&Integer.to_string(&1))
-    |> Enum.join(".")
+    |> Enum.map_join(".", &Integer.to_string(&1))
   end
 end

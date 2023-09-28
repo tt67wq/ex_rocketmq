@@ -90,11 +90,9 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
             expression_type: expression_type
           },
           pull_batch_size: pull_batch_size,
-          consume_batch_size: consume_batch_size,
           commit_offset: commit_offset,
           registry: registry,
-          broker_dynamic_supervisor: dynamic_supervisor,
-          processor: processor
+          broker_dynamic_supervisor: dynamic_supervisor
         } = pt
       ) do
     pull_req = %PullMsg.Request{
@@ -134,57 +132,86 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
         )
       end)
 
-    with {:ok,
-          %PullMsg.Response{
-            status: status,
-            next_begin_offset: next_begin_offset,
-            messages: message_exts
-          }} <- Broker.pull_message(broker, pull_req) do
-      case status do
-        @pull_status_found ->
-          consume_msgs_concurrently(
-            message_exts,
-            consume_batch_size,
-            topic,
-            processor,
-            bd,
-            group_name,
-            registry,
-            dynamic_supervisor
-          )
+    pull_from_broker(broker, pull_req, pt)
+    |> case do
+      {:ok, pt, delay} ->
+        Process.sleep(delay)
+        pull_msg(pt)
 
-          pull_msg(%{
-            pt
-            | next_offset: next_begin_offset,
-              commit_offset: next_begin_offset,
-              commit_offset_enable: true
-          })
+      :stop ->
+        Logger.critical("pull task terminated, stop consumer")
+    end
+  end
 
-        @pull_status_no_new_msg ->
-          Process.sleep(5000)
-          pull_msg(pt)
+  @spec pull_from_broker(
+          pid(),
+          PullMsg.Request.t(),
+          ConsumeState.t()
+        ) ::
+          {:ok, ConsumeState.t(), non_neg_integer()} | :stop
+  defp pull_from_broker(
+         broker,
+         req,
+         %ConsumeState{
+           topic: topic,
+           group_name: group_name,
+           mq: %MessageQueue{
+             queue_id: queue_id
+           },
+           broker_data: bd,
+           consume_orderly: false,
+           consume_batch_size: consume_batch_size,
+           registry: registry,
+           broker_dynamic_supervisor: dynamic_supervisor,
+           processor: processor
+         } = pt
+       ) do
+    Broker.pull_message(broker, req)
+    |> case do
+      {:ok,
+       %PullMsg.Response{
+         status: status,
+         next_begin_offset: next_begin_offset,
+         messages: message_exts
+       }} ->
+        case status do
+          @pull_status_found ->
+            consume_msgs_concurrently(
+              message_exts,
+              consume_batch_size,
+              topic,
+              processor,
+              bd,
+              group_name,
+              registry,
+              dynamic_supervisor
+            )
 
-        @pull_status_no_matched_msg ->
-          Process.sleep(1000)
-          pull_msg(pt)
+            {:ok,
+             %{
+               pt
+               | next_offset: next_begin_offset,
+                 commit_offset: next_begin_offset,
+                 commit_offset_enable: true
+             }, 0}
 
-        status ->
-          Logger.error("pull message error: #{inspect(status)}, terminate pull task")
-          :stop
-      end
-    else
+          @pull_status_no_new_msg ->
+            {:ok, pt, 5000}
+
+          @pull_status_no_matched_msg ->
+            {:ok, pt, 1000}
+
+          status ->
+            Logger.error("invalid pull message status result: #{inspect(status)}")
+            :stop
+        end
+
       {:error, reason} ->
         Logger.error(
           "pull message error: #{inspect(reason)}, topic: #{topic}, queue: #{queue_id}"
         )
 
-        Process.sleep(1000)
-        pull_msg(pt)
-
-      other ->
-        Logger.error("pull message error: #{inspect(other)}, topic: #{topic}, queue: #{queue_id}")
-        Process.sleep(1000)
-        pull_msg(pt)
+        {:ok, pt, 1000}
     end
   end
 
@@ -299,22 +326,20 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
        ) do
     message_exts
     |> Enum.chunk_every(batch)
-    |> Enum.map(fn msgs ->
-      Task.async(fn ->
-        Processor.process(processor, topic, msgs)
-        |> case do
-          :success ->
-            :ok
+    |> Task.async_stream(fn msgs ->
+      Processor.process(processor, topic, msgs)
+      |> case do
+        :success ->
+          :ok
 
-          {:retry_later, delay_level_map} ->
-            # send msg back
-            msgs
-            |> Enum.map(&%{&1 | delay_level: Map.get(delay_level_map, &1.msg_id, 1)})
-            |> send_msgs_back(bd, group, registry, dynamic_supervisor)
-        end
-      end)
+        {:retry_later, delay_level_map} ->
+          # send msg back
+          msgs
+          |> Enum.map(&%{&1 | delay_level: Map.get(delay_level_map, &1.msg_id, 1)})
+          |> send_msgs_back(bd, group, registry, dynamic_supervisor)
+      end
     end)
-    |> Task.await_many()
+    |> Stream.run()
   end
 
   @spec send_msgs_back(
@@ -336,31 +361,27 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
       )
 
     msgs
-    |> Enum.map(fn msg ->
-      Task.async(fn ->
-        Logger.info("send msg back: #{inspect(msg)}")
+    |> Task.async_stream(fn msg ->
+      Logger.info("send msg back: #{inspect(msg)}")
 
-        Broker.consumer_send_msg_back(broker, %ConsumerSendMsgBack{
-          group: group,
-          offset: msg.commit_log_offset,
-          delay_level: msg.delay_level,
-          origin_msg_id: msg.msg_id,
-          origin_topic: msg.message.topic,
-          unit_mode: false,
-          max_reconsume_times: 16
-        })
-        |> case do
-          :ok ->
-            nil
+      Broker.consumer_send_msg_back(broker, %ConsumerSendMsgBack{
+        group: group,
+        offset: msg.commit_log_offset,
+        delay_level: msg.delay_level,
+        origin_msg_id: msg.msg_id,
+        origin_topic: msg.message.topic,
+        unit_mode: false,
+        max_reconsume_times: 16
+      })
+      |> case do
+        :ok ->
+          nil
 
-          {:error, reason} ->
-            Logger.error("send msg back error: #{inspect(reason)}")
-            msg
-        end
-      end)
+        _ ->
+          msg
+      end
     end)
-    |> Task.await_many()
-    |> Enum.filter(&(&1 != nil))
+    |> Enum.reject(&is_nil(&1))
     |> send_msgs_back(bd, group, registry, dynamic_supervisor)
   end
 end

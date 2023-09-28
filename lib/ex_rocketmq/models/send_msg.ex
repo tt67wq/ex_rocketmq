@@ -120,27 +120,33 @@ defmodule ExRocketmq.Models.SendMsg do
 
     @spec from_pkt(Packet.t()) :: {:ok, t()} | Typespecs.error_t()
     def from_pkt(pkt) do
-      with {:ok, status} <- get_status(pkt),
-           ext_fields = Packet.packet(pkt, :ext_fields),
-           region_id = Map.get(ext_fields, "MSG_REGION", "DefaultRegion"),
-           trace = Map.get(ext_fields, "TRACE_ON", ""),
-           msg_id = Map.get(ext_fields, "msgId", "") do
-        {:ok,
-         %__MODULE__{
-           status: status,
-           msg_id: msg_id,
-           queue: %ExRocketmq.Models.MessageQueue{
-             # topic and broker_name will be set later
-             topic: "",
-             broker_name: "",
-             queue_id: get_int_ext_field(ext_fields, "queueId")
-           },
-           queue_offset: get_int_ext_field(ext_fields, "queueOffset"),
-           transaction_id: Map.get(ext_fields, "transactionId", ""),
-           offset_msg_id: Map.get(ext_fields, "msgId", ""),
-           region_id: region_id,
-           trace_on: trace not in ["false", ""]
-         }}
+      get_status(pkt)
+      |> case do
+        {:ok, status} ->
+          ext_fields = Packet.packet(pkt, :ext_fields)
+          region_id = Map.get(ext_fields, "MSG_REGION", "DefaultRegion")
+          trace = Map.get(ext_fields, "TRACE_ON", "")
+          msg_id = Map.get(ext_fields, "msgId", "")
+
+          {:ok,
+           %__MODULE__{
+             status: status,
+             msg_id: msg_id,
+             queue: %ExRocketmq.Models.MessageQueue{
+               # topic and broker_name will be set later
+               topic: "",
+               broker_name: "",
+               queue_id: get_int_ext_field(ext_fields, "queueId")
+             },
+             queue_offset: get_int_ext_field(ext_fields, "queueOffset"),
+             transaction_id: Map.get(ext_fields, "transactionId", ""),
+             offset_msg_id: Map.get(ext_fields, "msgId", ""),
+             region_id: region_id,
+             trace_on: trace not in ["false", ""]
+           }}
+
+        error ->
+          error
       end
     end
 

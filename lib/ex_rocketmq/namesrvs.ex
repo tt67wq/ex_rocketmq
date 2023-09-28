@@ -153,20 +153,19 @@ defmodule ExRocketmq.Namesrvs do
       [] ->
         input
 
-      [brokerAddrs, _] ->
+      [broker_addrs, _] ->
         # "\"brokerAddrs\":{0:\"10.88.4.78:20911\",1:\"10.88.4.79:20911\"}"
-        fixedBrokerAddrs =
-          brokerAddrs
+        fixed_broker_addrs =
+          broker_addrs
           |> String.slice(15..-2)
           |> String.split(",")
-          |> Enum.map(fn x ->
+          |> Enum.map_join(",", fn x ->
             [index, addr] = String.split(x, ":", parts: 2)
             "\"#{index}\":#{addr}"
           end)
-          |> Enum.join(",")
           |> then(&"\"brokerAddrs\":{#{&1}}")
 
-        String.replace(input, brokerAddrs, fixedBrokerAddrs)
+        String.replace(input, broker_addrs, fixed_broker_addrs)
     end
   end
 

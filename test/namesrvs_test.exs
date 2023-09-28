@@ -1,4 +1,5 @@
 defmodule NamesrvsTest do
+  @moduledoc false
   use ExUnit.Case
 
   alias ExRocketmq.{Namesrvs, Transport}
@@ -26,7 +27,6 @@ defmodule NamesrvsTest do
   end
 
   test "get_broker_cluster_info", %{namesrvs: namesrvs} do
-    assert {:ok, res} = Namesrvs.get_broker_cluster_info(namesrvs)
-    IO.inspect(res)
+    assert {:ok, _res} = Namesrvs.get_broker_cluster_info(namesrvs)
   end
 end

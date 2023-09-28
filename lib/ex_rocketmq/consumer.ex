@@ -268,7 +268,7 @@ defmodule ExRocketmq.Consumer do
 
     Process.send_after(self(), :update_route_info, 1000)
     Process.send_after(self(), :heartbeat, 2000)
-    Process.send_after(self(), :rebalance, 10000)
+    Process.send_after(self(), :rebalance, 10_000)
     {:noreply, %State{state | consume_info_map: Map.put(cmap, topic, {sub, [], [], %{}})}}
   end
 
@@ -299,16 +299,18 @@ defmodule ExRocketmq.Consumer do
       :error ->
         sub = message_selector_to_subscription(topic, msg_selector)
 
-        with {:ok, {broker_datas, mqs}} <- fetch_consume_info(namesrvs, topic) do
-          state = %State{
-            state
-            | consume_info_map: Map.put(cmap, topic, {sub, broker_datas, mqs, %{}})
-          }
+        fetch_consume_info(namesrvs, topic)
+        |> case do
+          {:ok, {broker_datas, mqs}} ->
+            state = %State{
+              state
+              | consume_info_map: Map.put(cmap, topic, {sub, broker_datas, mqs, %{}})
+            }
 
-          do_heartbeat(state)
+            do_heartbeat(state)
 
-          {:reply, :ok, state}
-        else
+            {:reply, :ok, state}
+
           {:error, reason} = error ->
             Logger.error("fetch consume info for topic: #{topic} error: #{inspect(reason)}")
             {:reply, error, state}
@@ -353,34 +355,21 @@ defmodule ExRocketmq.Consumer do
         :update_route_info,
         %State{
           namesrvs: namesrvs,
-          consume_info_map: cmap
+          consume_info_map: cmap,
+          registry: registry,
+          broker_dynamic_supervisor: broker_dynamic_supervisor
         } = state
       ) do
     cmap =
       cmap
       |> Map.to_list()
       |> Enum.reduce_while(%{}, fn {topic, {sub, _, _, consume_tasks} = old}, acc ->
-        case fetch_consume_info(namesrvs, topic) do
+        fetch_consume_info(namesrvs, topic)
+        |> case do
           {:ok, {broker_datas, mqs}} ->
             Logger.debug("fetch consume info for topic: #{topic}, mqs: #{inspect(mqs)}")
             # establish connection to new broker
-            broker_datas
-            |> Task.async_stream(fn bd ->
-              Broker.get_or_new_broker(
-                bd.broker_name,
-                BrokerData.master_addr(bd),
-                state.registry,
-                state.broker_dynamic_supervisor
-              )
-
-              Broker.get_or_new_broker(
-                bd.broker_name,
-                BrokerData.slave_addr(bd),
-                state.registry,
-                state.broker_dynamic_supervisor
-              )
-            end)
-            |> Stream.run()
+            connect_to_brokers(broker_datas, registry, broker_dynamic_supervisor)
 
             {:cont, Map.put(acc, topic, {sub, broker_datas, mqs, consume_tasks})}
 
@@ -470,17 +459,10 @@ defmodule ExRocketmq.Consumer do
            registry: registry,
            broker_dynamic_supervisor: broker_dynamic_supervisor,
            task_supervisor: task_supervisor,
-           processor: processor,
            consume_opts: %{
              group_name: group_name,
              model: :cluster,
-             balance_strategy: strategy,
-             consume_from_where: cfw,
-             consume_timestamp: consume_timestamp,
-             consume_orderly: consume_orderly,
-             post_subscription_when_pull: post_subscription_when_pull,
-             pull_batch_size: pull_batch_size,
-             consume_batch_size: consume_batch_size
+             balance_strategy: strategy
            }
          } = state
        ) do
@@ -511,12 +493,12 @@ defmodule ExRocketmq.Consumer do
           to_stop =
             consume_tasks
             |> Map.reject(fn {mq, _pid} -> Enum.member?(allocated_mqs, mq) end)
-            |> tap(fn to_stop ->
-              Enum.each(to_stop, fn {mq, pid} ->
-                Logger.warning("stop consume task: #{inspect(mq)}")
-                Task.Supervisor.terminate_child(task_supervisor, pid)
-              end)
-            end)
+
+          # terminate consume task
+          Enum.each(to_stop, fn {mq, pid} ->
+            Logger.warning("stop consume task: #{inspect(mq)}")
+            Task.Supervisor.terminate_child(task_supervisor, pid)
+          end)
 
           # to start consume task: in allocated_mqs but not in consume_tasks
           new_tasks =
@@ -529,35 +511,7 @@ defmodule ExRocketmq.Consumer do
 
               Logger.warning("new consume task for mq: #{inspect(mq)}")
 
-              {:ok, tid} =
-                Task.Supervisor.start_child(
-                  task_supervisor,
-                  fn ->
-                    InnerConsumer.Concurrent.pull_msg(%ConsumeState{
-                      task_id: Util.Random.generate_id("T"),
-                      group_name: group_name,
-                      topic: topic,
-                      broker_data: bd,
-                      registry: registry,
-                      broker_dynamic_supervisor: broker_dynamic_supervisor,
-                      mq: mq,
-                      subscription: sub,
-                      consume_from_where: cfw,
-                      consume_timestamp: consume_timestamp,
-                      consume_orderly: consume_orderly,
-                      post_subscription_when_pull: post_subscription_when_pull,
-                      commit_offset_enable: false,
-                      commit_offset: 0,
-                      pull_batch_size: pull_batch_size,
-                      consume_batch_size: consume_batch_size,
-                      # use a negative number to indicate that we need to get remote offset
-                      next_offset: -1,
-                      processor: processor
-                    })
-                  end,
-                  restart: :transient
-                )
-
+              {:ok, tid} = new_consume_task(task_supervisor, mq, bd, topic, sub, state)
               {mq, tid}
             end)
 
@@ -581,6 +535,59 @@ defmodule ExRocketmq.Consumer do
       # Logger.info("new consume info map: #{inspect(new_consume_info_map)}")
       %State{state | consume_info_map: new_consume_info_map}
     end)
+  end
+
+  @spec new_consume_task(
+          pid(),
+          MessageQueue.t(),
+          BrokerData.t(),
+          Typespecs.topic(),
+          Subscription.t(),
+          State.t()
+        ) :: {:ok, pid()}
+  defp new_consume_task(task_supervisor, mq, bd, topic, sub, %State{
+         registry: registry,
+         broker_dynamic_supervisor: broker_dynamic_supervisor,
+         task_supervisor: task_supervisor,
+         processor: processor,
+         consume_opts: %{
+           group_name: group_name,
+           model: :cluster,
+           consume_from_where: cfw,
+           consume_timestamp: consume_timestamp,
+           consume_orderly: consume_orderly,
+           post_subscription_when_pull: post_subscription_when_pull,
+           pull_batch_size: pull_batch_size,
+           consume_batch_size: consume_batch_size
+         }
+       }) do
+    Task.Supervisor.start_child(
+      task_supervisor,
+      fn ->
+        InnerConsumer.Concurrent.pull_msg(%ConsumeState{
+          task_id: Util.Random.generate_id("T"),
+          group_name: group_name,
+          topic: topic,
+          broker_data: bd,
+          registry: registry,
+          broker_dynamic_supervisor: broker_dynamic_supervisor,
+          mq: mq,
+          subscription: sub,
+          consume_from_where: cfw,
+          consume_timestamp: consume_timestamp,
+          consume_orderly: consume_orderly,
+          post_subscription_when_pull: post_subscription_when_pull,
+          commit_offset_enable: false,
+          commit_offset: 0,
+          pull_batch_size: pull_batch_size,
+          consume_batch_size: consume_batch_size,
+          # use a negative number to indicate that we need to get remote offset
+          next_offset: -1,
+          processor: processor
+        })
+      end,
+      restart: :transient
+    )
   end
 
   @spec do_heartbeat(State.t()) :: :ok
@@ -639,5 +646,30 @@ defmodule ExRocketmq.Consumer do
       sub_version: System.system_time(:nanosecond),
       expression_type: (msg_selector.type == :tag && "TAG") || "SQL92"
     }
+  end
+
+  @spec connect_to_brokers(
+          list(BrokerData.t()),
+          pid(),
+          pid()
+        ) :: :ok
+  defp connect_to_brokers(broker_datas, registry, dynamic_supervisor) do
+    broker_datas
+    |> Task.async_stream(fn bd ->
+      Broker.get_or_new_broker(
+        bd.broker_name,
+        BrokerData.master_addr(bd),
+        registry,
+        dynamic_supervisor
+      )
+
+      Broker.get_or_new_broker(
+        bd.broker_name,
+        BrokerData.slave_addr(bd),
+        registry,
+        dynamic_supervisor
+      )
+    end)
+    |> Stream.run()
   end
 end
