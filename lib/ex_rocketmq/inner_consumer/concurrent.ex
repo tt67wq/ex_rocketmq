@@ -113,10 +113,6 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
       expression_type: expression_type
     }
 
-    if retry_topic?(topic) do
-      Util.Debug.debug(pull_req)
-    end
-
     broker =
       if commit_offset_enable do
         BrokerData.master_addr(bd)
@@ -196,6 +192,8 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
              }, 0}
 
           @pull_status_no_new_msg ->
+            Logger.debug("no new msg for retry topic #{topic}, sleep 5s")
+
             {:ok, pt, 5000}
 
           @pull_status_no_matched_msg ->

@@ -52,7 +52,7 @@ Supervisor.start_link(
   [
     {Namesrvs,
      remotes: [
-       [transport: Transport.Tcp.new(host: "test.rocket-mq.net", port: 31120)]
+       [transport: Transport.Tcp.new(host: "test.rocket-mq.net", port: 31_120)]
      ],
      opts: [
        name: :namesrvs
