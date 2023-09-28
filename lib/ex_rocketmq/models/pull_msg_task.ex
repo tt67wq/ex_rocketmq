@@ -1,6 +1,8 @@
 defmodule ExRocketmq.Models.ConsumeState do
   @moduledoc false
 
+  alias ExRocketmq.Typespecs
+
   alias ExRocketmq.Models.{
     BrokerData,
     MessageQueue,
@@ -8,6 +10,7 @@ defmodule ExRocketmq.Models.ConsumeState do
   }
 
   defstruct task_id: "",
+            client_id: "",
             topic: "",
             group_name: "",
             registry: nil,
@@ -16,7 +19,6 @@ defmodule ExRocketmq.Models.ConsumeState do
             mq: nil,
             consume_from_where: :last_offset,
             consume_timestamp: 0,
-            consume_orderly: false,
             subscription: nil,
             next_offset: 0,
             commit_offset_enable: true,
@@ -24,19 +26,21 @@ defmodule ExRocketmq.Models.ConsumeState do
             post_subscription_when_pull: false,
             pull_batch_size: 32,
             consume_batch_size: 16,
-            processor: nil
+            processor: nil,
+            lock_ttl_ms: 0,
+            max_reconsume_times: 16
 
   @type t :: %__MODULE__{
           task_id: String.t(),
-          topic: String.t(),
-          group_name: String.t(),
+          client_id: String.t(),
+          topic: Typespecs.topic(),
+          group_name: Typespecs.group_name(),
           registry: atom(),
           broker_dynamic_supervisor: pid(),
           broker_data: BrokerData.t(),
           mq: MessageQueue.t(),
           consume_from_where: :last_offset | :first_offset | :timestamp,
           consume_timestamp: non_neg_integer(),
-          consume_orderly: boolean(),
           subscription: Subscription.t(),
           next_offset: integer(),
           commit_offset_enable: boolean(),
@@ -44,6 +48,8 @@ defmodule ExRocketmq.Models.ConsumeState do
           post_subscription_when_pull: boolean(),
           pull_batch_size: non_neg_integer(),
           consume_batch_size: non_neg_integer(),
-          processor: ExRocketmq.Consumer.Processor.t()
+          processor: ExRocketmq.Consumer.Processor.t(),
+          lock_ttl_ms: integer(),
+          max_reconsume_times: integer()
         }
 end

@@ -1,28 +1,27 @@
-defmodule ExRocketmq.InnerConsumer.Concurrent do
+defmodule ExRocketmq.InnerConsumer.Order do
   @moduledoc """
-  concurrently mq consumer
+  orderly mq consumer
   """
 
   alias ExRocketmq.{
-    # Typespecs,
     Broker,
     Protocol.PullStatus,
-    Consumer.Processor,
-    InnerConsumer.Common
+    InnerConsumer.Common,
+    Consumer.Processor
   }
 
   alias ExRocketmq.Models.{
-    BrokerData,
-    MessageQueue,
-    Subscription,
     ConsumeState,
+    MessageQueue,
+    BrokerData,
+    Lock,
+    Subscription,
     PullMsg,
-    ConsumerSendMsgBack,
     MessageExt
   }
 
-  require PullStatus
   require Logger
+  require PullStatus
 
   @pull_status_found PullStatus.pull_found()
   @pull_status_no_new_msg PullStatus.pull_no_new_msg()
@@ -30,6 +29,46 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
 
   def pull_msg(
         %ConsumeState{
+          lock_ttl_ms: ttl,
+          broker_data: bd,
+          registry: registry,
+          broker_dynamic_supervisor: dynamic_supervisor,
+          group_name: group_name,
+          client_id: client_id,
+          mq: mq
+        } = task
+      )
+      when ttl <= 0 do
+    # lock expired, request lock again
+    broker =
+      Broker.get_or_new_broker(
+        bd.broker_name,
+        BrokerData.master_addr(bd),
+        registry,
+        dynamic_supervisor
+      )
+
+    req = %Lock.Req{
+      consumer_group: group_name,
+      client_id: client_id,
+      mq: [mq]
+    }
+
+    Broker.lock_batch_mq(broker, req)
+    |> case do
+      {:ok, _} ->
+        pull_msg(%{task | lock_ttl_ms: 30_000})
+
+      {:error, reason} ->
+        Logger.error("lock mq failed, reason: #{inspect(reason)}, retry later")
+        Process.sleep(5000)
+        pull_msg(task)
+    end
+  end
+
+  def pull_msg(
+        %ConsumeState{
+          next_offset: -1,
           broker_data: bd,
           registry: registry,
           broker_dynamic_supervisor: dynamic_supervisor,
@@ -38,16 +77,18 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
           mq: %MessageQueue{
             queue_id: queue_id
           },
-          next_offset: -1,
           consume_from_where: cfw,
-          consume_timestamp: consume_timestamp
+          consume_timestamp: consume_timestamp,
+          lock_ttl_ms: ttl
         } = task
       ) do
+    now = System.system_time(:millisecond)
+
     # get remote offset
     {:ok, offset} =
       Broker.get_or_new_broker(
         bd.broker_name,
-        BrokerData.slave_addr(bd),
+        BrokerData.master_addr(bd),
         registry,
         dynamic_supervisor
       )
@@ -59,37 +100,38 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
         consume_timestamp
       )
 
-    Logger.info("mq #{topic}-#{queue_id}'s next offset: #{inspect(offset)}")
+    cost = System.system_time(:millisecond) - now
 
     pull_msg(%{
       task
       | next_offset: offset,
         commit_offset: offset,
-        commit_offset_enable: offset > 0
+        commit_offset_enable: offset > 0,
+        lock_ttl_ms: ttl - cost
     })
   end
 
   def pull_msg(
         %ConsumeState{
-          topic: topic,
           group_name: group_name,
+          topic: topic,
           mq: %MessageQueue{
             queue_id: queue_id
           },
           broker_data: bd,
           next_offset: next_offset,
           commit_offset_enable: commit_offset_enable,
+          commit_offset: commit_offset,
           post_subscription_when_pull: post_subscription_when_pull,
+          pull_batch_size: pull_batch_size,
           subscription: %Subscription{
             sub_string: sub_string,
             class_filter_mode: cfm,
             expression_type: expression_type
           },
-          pull_batch_size: pull_batch_size,
-          commit_offset: commit_offset,
           registry: registry,
           broker_dynamic_supervisor: dynamic_supervisor
-        } = pt
+        } = task
       ) do
     pull_req = %PullMsg.Request{
       consumer_group: group_name,
@@ -124,7 +166,7 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
         )
       end)
 
-    pull_from_broker(broker, pull_req, pt)
+    pull_from_broker(broker, pull_req, task)
     |> case do
       {:ok, pt, delay} ->
         Process.sleep(delay)
@@ -161,7 +203,7 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
        }} ->
         case status do
           @pull_status_found ->
-            consume_msgs_concurrently(message_exts, pt)
+            consume_msgs_orderly(message_exts, pt)
 
             {:ok,
              %{
@@ -193,79 +235,43 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
     end
   end
 
-  @spec consume_msgs_concurrently(
-          list(MessageExt.t()),
-          ConsumeState.t()
-        ) :: any()
-  defp consume_msgs_concurrently(
+  defp consume_msgs_orderly(
          message_exts,
          %ConsumeState{
            topic: topic,
            consume_batch_size: consume_batch_size,
-           processor: processor
-         } = pt
+           processor: processor,
+           max_reconsume_times: max_reconsume_times
+         }
        ) do
     message_exts
+    |> Enum.sort_by(fn msg -> msg.queue_offset end)
     |> Enum.chunk_every(consume_batch_size)
-    |> Task.async_stream(fn msgs ->
-      Processor.process(processor, topic, msgs)
-      |> case do
-        :success ->
-          :ok
-
-        {:retry_later, delay_level_map} ->
-          # send msg back
-          msgs
-          |> Enum.map(&%{&1 | delay_level: Map.get(delay_level_map, &1.msg_id, 1)})
-          |> send_msgs_back(pt)
-      end
-    end)
-    |> Stream.run()
+    |> do_consume(topic, processor, max_reconsume_times)
   end
 
-  @spec send_msgs_back(list(MessageExt.t()), ConsumeState.t()) :: :ok
-  defp send_msgs_back([], _), do: :ok
+  defp do_consume([], _, _, _), do: :ok
 
-  defp send_msgs_back(
-         msgs,
-         %ConsumeState{
-           group_name: group_name,
-           broker_data: bd,
-           registry: registry,
-           broker_dynamic_supervisor: dynamic_supervisor,
-           max_reconsume_times: max_reconsume_times
-         } = pt
-       ) do
-    broker =
-      Broker.get_or_new_broker(
-        bd.broker_name,
-        BrokerData.master_addr(bd),
-        registry,
-        dynamic_supervisor
-      )
+  defp do_consume([msgs | tail], topic, processor, max_reconsume_times) do
+    Processor.process(processor, topic, msgs)
+    |> case do
+      :success ->
+        do_consume(tail, topic, processor, max_reconsume_times)
 
-    msgs
-    |> Task.async_stream(fn msg ->
-      Logger.info("send msg back: #{inspect(msg)}")
+      {:suspend, delay, msg_ids} ->
+        Process.sleep(delay)
 
-      Broker.consumer_send_msg_back(broker, %ConsumerSendMsgBack{
-        group: group_name,
-        offset: msg.commit_log_offset,
-        delay_level: msg.delay_level,
-        origin_msg_id: msg.msg_id,
-        origin_topic: msg.message.topic,
-        unit_mode: false,
-        max_reconsume_times: max_reconsume_times
-      })
-      |> case do
-        :ok ->
-          nil
+        {to_retry, _to_sendback} =
+          msgs
+          |> Enum.filter(fn msg -> msg.msg_id in msg_ids end)
+          |> Enum.map(fn %MessageExt{reconsume_times: rt} = msg ->
+            %MessageExt{msg | reconsume_times: rt + 1}
+          end)
+          |> Enum.split_with(fn %MessageExt{reconsume_times: rt} -> rt <= max_reconsume_times end)
 
-        _ ->
-          msg
-      end
-    end)
-    |> Enum.reject(&is_nil(&1))
-    |> send_msgs_back(pt)
+        if length(to_retry) > 0 do
+          do_consume([to_retry | tail], topic, processor, max_reconsume_times)
+        end
+    end
   end
 end

@@ -21,10 +21,10 @@ defmodule ExRocketmq.Consumer.Processor do
   @typedoc """
   orderly consume result must be one of:
     - :success
-    - {:suspend, suspend_milliseconds}
+    - {:suspend, suspend_milliseconds, [msg_id]}
   """
   @type orderly_consume_result ::
-          :success | {:suspend, non_neg_integer()}
+          :success | {:suspend, non_neg_integer(), [Typespecs.msg_id()]}
 
   @type consume_result :: concurrent_consume_result() | orderly_consume_result()
 

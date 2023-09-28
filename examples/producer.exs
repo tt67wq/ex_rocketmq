@@ -76,18 +76,20 @@ defmodule DemoProducer do
   defp get_msg() do
     @msgs
     |> String.split("\n")
-    |> Enum.random()
   end
 
   def run(opts) do
-    Producer.send_sync(:producer, [
-      %Message{topic: @topic, body: get_msg()},
-      %Message{topic: @topic, body: get_msg()},
-      %Message{topic: @topic, body: get_msg()},
-      %Message{topic: @topic, body: get_msg()},
-      %Message{topic: @topic, body: get_msg()},
-      %Message{topic: @topic, body: get_msg()}
-    ])
+    get_msg()
+    |> Enum.chunk_every(4)
+    |> Enum.each(fn msgs ->
+      to_emit =
+        msgs
+        |> Enum.map(fn msg ->
+          %Message{topic: @topic, body: msg}
+        end)
+
+      Producer.send_sync(:producer, to_emit)
+    end)
 
     Process.sleep(1000)
     run(opts)
@@ -100,7 +102,7 @@ Supervisor.start_link(
   [
     {Namesrvs,
      remotes: [
-       [transport: Transport.Tcp.new(host: "test.rocket-mq.net", port: 31120)]
+       [transport: Transport.Tcp.new(host: "test.rocket-mq.net", port: 31_120)]
      ],
      opts: [
        name: :namesrvs

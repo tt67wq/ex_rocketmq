@@ -34,7 +34,8 @@ defmodule ExRocketmq.Consumer do
               balance_strategy: ExRocketmq.Consumer.BalanceStrategy.t(),
               post_subscription_when_pull: boolean(),
               pull_batch_size: non_neg_integer(),
-              consume_batch_size: non_neg_integer()
+              consume_batch_size: non_neg_integer(),
+              max_reconsume_times: non_neg_integer()
             }
           }
 
@@ -56,7 +57,8 @@ defmodule ExRocketmq.Consumer do
                 consume_timestamp: 0,
                 post_subscription_when_pull: false,
                 pull_batch_size: 32,
-                consume_batch_size: 16
+                consume_batch_size: 16,
+                max_reconsume_times: 16
               }
   end
 
@@ -157,6 +159,11 @@ defmodule ExRocketmq.Consumer do
       doc: "The batch size to consume message",
       default: 16
     ],
+    max_reconsume_times: [
+      type: :non_neg_integer,
+      doc: "The max times to reconsume message",
+      default: 16
+    ],
     opts: [
       type: :keyword_list,
       default: [],
@@ -232,7 +239,8 @@ defmodule ExRocketmq.Consumer do
          balance_strategy: opts[:balance_strategy],
          post_subscription_when_pull: opts[:post_subscription_when_pull],
          pull_batch_size: opts[:pull_batch_size],
-         consume_batch_size: opts[:consume_batch_size]
+         consume_batch_size: opts[:consume_batch_size],
+         max_reconsume_times: opts[:max_reconsume_times]
        }
      }, {:continue, :on_start}}
   end
@@ -546,6 +554,7 @@ defmodule ExRocketmq.Consumer do
           State.t()
         ) :: {:ok, pid()}
   defp new_consume_task(task_supervisor, mq, bd, topic, sub, %State{
+         client_id: cid,
          registry: registry,
          broker_dynamic_supervisor: broker_dynamic_supervisor,
          task_supervisor: task_supervisor,
@@ -555,10 +564,11 @@ defmodule ExRocketmq.Consumer do
            model: :cluster,
            consume_from_where: cfw,
            consume_timestamp: consume_timestamp,
-           consume_orderly: consume_orderly,
+           consume_orderly: false,
            post_subscription_when_pull: post_subscription_when_pull,
            pull_batch_size: pull_batch_size,
-           consume_batch_size: consume_batch_size
+           consume_batch_size: consume_batch_size,
+           max_reconsume_times: max_reconsume_times
          }
        }) do
     Task.Supervisor.start_child(
@@ -566,6 +576,7 @@ defmodule ExRocketmq.Consumer do
       fn ->
         InnerConsumer.Concurrent.pull_msg(%ConsumeState{
           task_id: Util.Random.generate_id("T"),
+          client_id: cid,
           group_name: group_name,
           topic: topic,
           broker_data: bd,
@@ -575,7 +586,6 @@ defmodule ExRocketmq.Consumer do
           subscription: sub,
           consume_from_where: cfw,
           consume_timestamp: consume_timestamp,
-          consume_orderly: consume_orderly,
           post_subscription_when_pull: post_subscription_when_pull,
           commit_offset_enable: false,
           commit_offset: 0,
@@ -583,7 +593,8 @@ defmodule ExRocketmq.Consumer do
           consume_batch_size: consume_batch_size,
           # use a negative number to indicate that we need to get remote offset
           next_offset: -1,
-          processor: processor
+          processor: processor,
+          max_reconsume_times: max_reconsume_times
         })
       end,
       restart: :transient

@@ -29,22 +29,11 @@ defmodule MyProcessor do
           Processor.consume_result() | {:error, term()}
   def process(_, topic, msgs) do
     msgs
-    |> Enum.reduce(%{}, fn msg, acc ->
+    |> Enum.each(fn msg ->
       IO.puts("#{topic}: #{msg.queue_offset} -- #{msg.message.body}")
-
-      if :random.uniform(10) < 2 do
-        Map.put(acc, msg.msg_id, 1)
-      else
-        acc
-      end
     end)
-    |> case do
-      %{} ->
-        :success
 
-      delay_level_map ->
-        {:retry_later, delay_level_map}
-    end
+    :success
   end
 end
 
