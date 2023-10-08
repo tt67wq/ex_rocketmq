@@ -17,7 +17,6 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
     Subscription,
     ConsumeState,
     PullMsg,
-    ConsumerSendMsgBack,
     MessageExt
   }
 
@@ -217,55 +216,9 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
           # send msg back
           msgs
           |> Enum.map(&%{&1 | delay_level: Map.get(delay_level_map, &1.msg_id, 1)})
-          |> send_msgs_back(pt)
+          |> Common.send_msgs_back(pt)
       end
     end)
     |> Stream.run()
-  end
-
-  @spec send_msgs_back(list(MessageExt.t()), ConsumeState.t()) :: :ok
-  defp send_msgs_back([], _), do: :ok
-
-  defp send_msgs_back(
-         msgs,
-         %ConsumeState{
-           group_name: group_name,
-           broker_data: bd,
-           registry: registry,
-           broker_dynamic_supervisor: dynamic_supervisor,
-           max_reconsume_times: max_reconsume_times
-         } = pt
-       ) do
-    broker =
-      Broker.get_or_new_broker(
-        bd.broker_name,
-        BrokerData.master_addr(bd),
-        registry,
-        dynamic_supervisor
-      )
-
-    msgs
-    |> Task.async_stream(fn msg ->
-      Logger.info("send msg back: #{inspect(msg)}")
-
-      Broker.consumer_send_msg_back(broker, %ConsumerSendMsgBack{
-        group: group_name,
-        offset: msg.commit_log_offset,
-        delay_level: msg.delay_level,
-        origin_msg_id: msg.msg_id,
-        origin_topic: msg.message.topic,
-        unit_mode: false,
-        max_reconsume_times: max_reconsume_times
-      })
-      |> case do
-        :ok ->
-          nil
-
-        _ ->
-          msg
-      end
-    end)
-    |> Enum.reject(&is_nil(&1))
-    |> send_msgs_back(pt)
   end
 end

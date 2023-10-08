@@ -7,7 +7,10 @@ defmodule ExRocketmq.InnerConsumer.Common do
   alias ExRocketmq.Models.{
     QueryConsumerOffset,
     GetMaxOffset,
-    SearchOffset
+    SearchOffset,
+    ConsumeState,
+    ConsumerSendMsgBack,
+    BrokerData
   }
 
   require Logger
@@ -98,5 +101,57 @@ defmodule ExRocketmq.InnerConsumer.Common do
     |> Bitwise.bor(2)
     |> Util.BitHelper.set_bit(2, subscription)
     |> Util.BitHelper.set_bit(3, class_filter_mode)
+  end
+
+  @spec send_msgs_back(list(MessageExt.t()), ConsumeState.t()) :: :ok
+  def send_msgs_back([], _), do: :ok
+
+  def send_msgs_back(
+        msgs,
+        %ConsumeState{
+          group_name: group_name,
+          broker_data: bd,
+          registry: registry,
+          broker_dynamic_supervisor: dynamic_supervisor,
+          max_reconsume_times: max_reconsume_times
+        } = pt
+      ) do
+    broker =
+      Broker.get_or_new_broker(
+        bd.broker_name,
+        BrokerData.master_addr(bd),
+        registry,
+        dynamic_supervisor
+      )
+
+    msgs
+    |> Task.async_stream(fn msg ->
+      Logger.info("send msg back: #{inspect(msg)}")
+
+      Broker.consumer_send_msg_back(broker, %ConsumerSendMsgBack{
+        group: group_name,
+        offset: msg.commit_log_offset,
+        delay_level: msg.delay_level,
+        origin_msg_id: msg.msg_id,
+        origin_topic: msg.message.topic,
+        unit_mode: false,
+        max_reconsume_times: max_reconsume_times
+      })
+      |> case do
+        :ok ->
+          nil
+
+        _ ->
+          msg
+      end
+    end)
+    |> Enum.reject(&is_nil(&1))
+    |> send_msgs_back(pt)
+  end
+
+  def async_send_msgs_back(msgs, pt) do
+    Task.start(fn ->
+      send_msgs_back(msgs, pt)
+    end)
   end
 end

@@ -564,38 +564,47 @@ defmodule ExRocketmq.Consumer do
            model: :cluster,
            consume_from_where: cfw,
            consume_timestamp: consume_timestamp,
-           consume_orderly: false,
+           consume_orderly: consume_orderly,
            post_subscription_when_pull: post_subscription_when_pull,
            pull_batch_size: pull_batch_size,
            consume_batch_size: consume_batch_size,
            max_reconsume_times: max_reconsume_times
          }
        }) do
+    inner_consumer =
+      if consume_orderly do
+        InnerConsumer.Orderly
+      else
+        InnerConsumer.Concurrent
+      end
+
     Task.Supervisor.start_child(
       task_supervisor,
       fn ->
-        InnerConsumer.Concurrent.pull_msg(%ConsumeState{
-          task_id: Util.Random.generate_id("T"),
-          client_id: cid,
-          group_name: group_name,
-          topic: topic,
-          broker_data: bd,
-          registry: registry,
-          broker_dynamic_supervisor: broker_dynamic_supervisor,
-          mq: mq,
-          subscription: sub,
-          consume_from_where: cfw,
-          consume_timestamp: consume_timestamp,
-          post_subscription_when_pull: post_subscription_when_pull,
-          commit_offset_enable: false,
-          commit_offset: 0,
-          pull_batch_size: pull_batch_size,
-          consume_batch_size: consume_batch_size,
-          # use a negative number to indicate that we need to get remote offset
-          next_offset: -1,
-          processor: processor,
-          max_reconsume_times: max_reconsume_times
-        })
+        apply(inner_consumer, :pull_msg, [
+          %ConsumeState{
+            task_id: Util.Random.generate_id("T"),
+            client_id: cid,
+            group_name: group_name,
+            topic: topic,
+            broker_data: bd,
+            registry: registry,
+            broker_dynamic_supervisor: broker_dynamic_supervisor,
+            mq: mq,
+            subscription: sub,
+            consume_from_where: cfw,
+            consume_timestamp: consume_timestamp,
+            post_subscription_when_pull: post_subscription_when_pull,
+            commit_offset_enable: false,
+            commit_offset: 0,
+            pull_batch_size: pull_batch_size,
+            consume_batch_size: consume_batch_size,
+            # use a negative number to indicate that we need to get remote offset
+            next_offset: -1,
+            processor: processor,
+            max_reconsume_times: max_reconsume_times
+          }
+        ])
       end,
       restart: :transient
     )

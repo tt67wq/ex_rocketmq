@@ -130,9 +130,12 @@ defmodule ExRocketmq.InnerConsumer.Order do
             expression_type: expression_type
           },
           registry: registry,
-          broker_dynamic_supervisor: dynamic_supervisor
+          broker_dynamic_supervisor: dynamic_supervisor,
+          lock_ttl_ms: ttl
         } = task
       ) do
+    now = System.system_time(:millisecond)
+
     pull_req = %PullMsg.Request{
       consumer_group: group_name,
       topic: topic,
@@ -170,7 +173,8 @@ defmodule ExRocketmq.InnerConsumer.Order do
     |> case do
       {:ok, pt, delay} ->
         Process.sleep(delay)
-        pull_msg(pt)
+        cost = System.system_time(:millisecond) - now
+        pull_msg(%{pt | lock_ttl_ms: ttl - cost})
 
       :stop ->
         Logger.critical("pull task terminated, stop consumer")
@@ -237,31 +241,37 @@ defmodule ExRocketmq.InnerConsumer.Order do
 
   defp consume_msgs_orderly(
          message_exts,
-         %ConsumeState{
-           topic: topic,
-           consume_batch_size: consume_batch_size,
-           processor: processor,
-           max_reconsume_times: max_reconsume_times
-         }
+         %ConsumeState{consume_batch_size: consume_batch_size} = pt
        ) do
     message_exts
     |> Enum.sort_by(fn msg -> msg.queue_offset end)
     |> Enum.chunk_every(consume_batch_size)
-    |> do_consume(topic, processor, max_reconsume_times)
+    |> do_consume(pt)
   end
 
-  defp do_consume([], _, _, _), do: :ok
+  @spec do_consume(
+          list(list(MessageExt.t())),
+          ConsumeState.t()
+        ) :: :ok
+  defp do_consume([], _), do: :ok
 
-  defp do_consume([msgs | tail], topic, processor, max_reconsume_times) do
+  defp do_consume(
+         [msgs | tail],
+         %ConsumeState{
+           topic: topic,
+           processor: processor,
+           max_reconsume_times: max_reconsume_times
+         } = pt
+       ) do
     Processor.process(processor, topic, msgs)
     |> case do
       :success ->
-        do_consume(tail, topic, processor, max_reconsume_times)
+        do_consume(tail, pt)
 
       {:suspend, delay, msg_ids} ->
         Process.sleep(delay)
 
-        {to_retry, _to_sendback} =
+        {to_retry, to_sendback} =
           msgs
           |> Enum.filter(fn msg -> msg.msg_id in msg_ids end)
           |> Enum.map(fn %MessageExt{reconsume_times: rt} = msg ->
@@ -269,8 +279,12 @@ defmodule ExRocketmq.InnerConsumer.Order do
           end)
           |> Enum.split_with(fn %MessageExt{reconsume_times: rt} -> rt <= max_reconsume_times end)
 
+        if length(to_sendback) > 0 do
+          Common.async_send_msgs_back(to_sendback, pt)
+        end
+
         if length(to_retry) > 0 do
-          do_consume([to_retry | tail], topic, processor, max_reconsume_times)
+          do_consume([to_retry | tail], pt)
         end
     end
   end
