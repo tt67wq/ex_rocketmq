@@ -573,7 +573,7 @@ defmodule ExRocketmq.Consumer do
        }) do
     inner_consumer =
       if consume_orderly do
-        InnerConsumer.Orderly
+        InnerConsumer.Order
       else
         InnerConsumer.Concurrent
       end

@@ -13,7 +13,8 @@ defmodule DemoProducer do
   alias ExRocketmq.Producer
   alias ExRocketmq.Models.Message
 
-  @topic "POETRY"
+  @topic "POETRY_ORDERLY"
+  # @topic "POETRY"
 
   @msgs "豫章故郡，洪都新府。
 星分翼轸，地接衡庐。
