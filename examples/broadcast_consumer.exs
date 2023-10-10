@@ -34,7 +34,6 @@ defmodule MyProcessor do
     end)
 
     :success
-    # {:retry_later, msgs |> Enum.map(fn msg -> {msg.msg_id, 2} end) |> Map.new()}
   end
 end
 
@@ -52,6 +51,7 @@ Supervisor.start_link(
      namesrvs: :namesrvs,
      processor: MyProcessor.new(),
      subscriptions: %{"POETRY" => MsgSelector.new(:tag, "*")},
+     model: :broadcast,
      opts: [
        name: :consumer
      ]}

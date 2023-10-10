@@ -256,6 +256,7 @@ defmodule ExRocketmq.Consumer do
     end)
   end
 
+  # sub retry topic
   def handle_continue(
         :on_start,
         %State{
@@ -281,8 +282,8 @@ defmodule ExRocketmq.Consumer do
   end
 
   def handle_continue(:on_start, state) do
-    Process.send_after(self(), :heartbeat, 1000)
     Process.send_after(self(), :update_route_info, 1000)
+    Process.send_after(self(), :heartbeat, 2000)
     Process.send_after(self(), :rebalance, 10_000)
     {:noreply, state}
   end
@@ -506,7 +507,6 @@ defmodule ExRocketmq.Consumer do
           |> Map.reject(fn {mq, _} -> Map.has_key?(to_stop, mq) end)
 
         Map.put(acc, topic, {sub, broker_datas, mqs, current_consume_task})
-        acc
       end
     )
     |> then(fn new_consume_info_map ->
