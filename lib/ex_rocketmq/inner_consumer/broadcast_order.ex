@@ -1,27 +1,25 @@
-defmodule ExRocketmq.InnerConsumer.Concurrent do
+defmodule ExRocketmq.InnerConsumer.BroadcastOrder do
   @moduledoc """
-  concurrently mq consumer
+  broadcast mode orderly mq consumer
   """
-
   alias ExRocketmq.{
-    # Typespecs,
     Broker,
     Protocol.PullStatus,
-    Consumer.Processor,
-    InnerConsumer.Common
+    InnerConsumer.Common,
+    Consumer.Processor
   }
 
   alias ExRocketmq.Models.{
-    BrokerData,
-    MessageQueue,
-    Subscription,
     ConsumeState,
+    MessageQueue,
+    BrokerData,
+    Subscription,
     PullMsg,
     MessageExt
   }
 
-  require PullStatus
   require Logger
+  require PullStatus
 
   @pull_status_found PullStatus.pull_found()
   @pull_status_no_new_msg PullStatus.pull_no_new_msg()
@@ -63,32 +61,30 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
     pull_msg(%{
       task
       | next_offset: offset,
-        commit_offset: offset,
-        commit_offset_enable: offset > 0
+        commit_offset: 0,
+        commit_offset_enable: false
     })
   end
 
   def pull_msg(
         %ConsumeState{
-          topic: topic,
           group_name: group_name,
+          topic: topic,
           mq: %MessageQueue{
             queue_id: queue_id
           },
           broker_data: bd,
           next_offset: next_offset,
-          commit_offset_enable: commit_offset_enable,
           post_subscription_when_pull: post_subscription_when_pull,
+          pull_batch_size: pull_batch_size,
           subscription: %Subscription{
             sub_string: sub_string,
             class_filter_mode: cfm,
             expression_type: expression_type
           },
-          pull_batch_size: pull_batch_size,
-          commit_offset: commit_offset,
           registry: registry,
           broker_dynamic_supervisor: dynamic_supervisor
-        } = pt
+        } = task
       ) do
     pull_req = %PullMsg.Request{
       consumer_group: group_name,
@@ -98,22 +94,19 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
       max_msg_nums: pull_batch_size,
       sys_flag:
         Common.build_pullmsg_sys_flag(
-          commit_offset_enable,
+          false,
           post_subscription_when_pull and cfm,
           cfm
         ),
-      commit_offset: commit_offset,
+      commit_offset: 0,
       suspend_timeout_millis: 20_000,
       sub_expression: sub_string,
       expression_type: expression_type
     }
 
     broker =
-      if commit_offset_enable do
-        BrokerData.master_addr(bd)
-      else
-        BrokerData.slave_addr(bd)
-      end
+      bd
+      |> BrokerData.slave_addr()
       |> then(fn addr ->
         Broker.get_or_new_broker(
           bd.broker_name,
@@ -123,7 +116,7 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
         )
       end)
 
-    pull_from_broker(broker, pull_req, pt)
+    pull_from_broker(broker, pull_req, task)
     |> case do
       {:ok, pt, delay} ->
         Process.sleep(delay)
@@ -160,18 +153,12 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
        }} ->
         case status do
           @pull_status_found ->
-            consume_msgs_concurrently(message_exts, pt)
+            consume_msgs_orderly(message_exts, pt)
 
-            {:ok,
-             %{
-               pt
-               | next_offset: next_begin_offset,
-                 commit_offset: next_begin_offset,
-                 commit_offset_enable: true
-             }, 0}
+            {:ok, %{pt | next_offset: next_begin_offset}, 0}
 
           @pull_status_no_new_msg ->
-            Logger.debug("no new msg for topic #{topic}, sleep 5s")
+            Logger.debug("no new msg for retry topic #{topic}, sleep 5s")
 
             {:ok, pt, 5000}
 
@@ -192,33 +179,49 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
     end
   end
 
-  @spec consume_msgs_concurrently(
-          list(MessageExt.t()),
-          ConsumeState.t()
-        ) :: any()
-  defp consume_msgs_concurrently(
+  defp consume_msgs_orderly(
          message_exts,
-         %ConsumeState{
-           topic: topic,
-           consume_batch_size: consume_batch_size,
-           processor: processor
-         } = pt
+         %ConsumeState{consume_batch_size: consume_batch_size} = pt
        ) do
     message_exts
+    |> Enum.sort_by(fn msg -> msg.queue_offset end)
     |> Enum.chunk_every(consume_batch_size)
-    |> Task.async_stream(fn msgs ->
-      Processor.process(processor, topic, msgs)
-      |> case do
-        :success ->
-          :ok
+    |> do_consume(pt)
+  end
 
-        {:retry_later, delay_level_map} ->
-          # send msg back
+  @spec do_consume(
+          list(list(MessageExt.t())),
+          ConsumeState.t()
+        ) :: :ok
+  defp do_consume([], _), do: :ok
+
+  defp do_consume(
+         [msgs | tail],
+         %ConsumeState{
+           topic: topic,
+           processor: processor,
+           max_reconsume_times: max_reconsume_times
+         } = pt
+       ) do
+    Processor.process(processor, topic, msgs)
+    |> case do
+      :success ->
+        do_consume(tail, pt)
+
+      {:suspend, delay, msg_ids} ->
+        Process.sleep(delay)
+
+        {to_retry, _to_sendback} =
           msgs
-          |> Enum.map(&%{&1 | delay_level: Map.get(delay_level_map, &1.msg_id, 1)})
-          |> Common.send_msgs_back(pt)
-      end
-    end)
-    |> Stream.run()
+          |> Enum.filter(fn msg -> msg.msg_id in msg_ids end)
+          |> Enum.map(fn %MessageExt{reconsume_times: rt} = msg ->
+            %MessageExt{msg | reconsume_times: rt + 1}
+          end)
+          |> Enum.split_with(fn %MessageExt{reconsume_times: rt} -> rt <= max_reconsume_times end)
+
+        if length(to_retry) > 0 do
+          do_consume([to_retry | tail], pt)
+        end
+    end
   end
 end

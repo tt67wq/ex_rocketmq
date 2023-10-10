@@ -283,6 +283,7 @@ defmodule ExRocketmq.Consumer do
   def handle_continue(:on_start, state) do
     Process.send_after(self(), :heartbeat, 1000)
     Process.send_after(self(), :update_route_info, 1000)
+    Process.send_after(self(), :rebalance, 10_000)
     {:noreply, state}
   end
 
@@ -462,6 +463,59 @@ defmodule ExRocketmq.Consumer do
   @spec do_balance(State.t()) :: State.t()
   defp do_balance(
          %State{
+           consume_info_map: consume_info_map,
+           task_supervisor: task_supervisor,
+           consume_opts: %{
+             model: :broadcast
+           }
+         } = state
+       ) do
+    consume_info_map
+    |> Map.to_list()
+    |> Enum.reduce(
+      %{},
+      fn {topic, {sub, broker_datas, mqs, consume_tasks}}, acc ->
+        to_stop =
+          consume_tasks
+          |> Map.reject(fn {mq, _pid} -> Enum.member?(mqs, mq) end)
+
+        # terminate consume task
+        Enum.each(to_stop, fn {mq, pid} ->
+          Logger.warning("stop consume task: #{inspect(mq)}")
+          Task.Supervisor.terminate_child(task_supervisor, pid)
+        end)
+
+        # to start consume task: in allocated_mqs but not in consume_tasks
+        new_tasks =
+          mqs
+          |> Enum.reject(fn mq -> Map.has_key?(consume_tasks, mq) end)
+          |> Enum.into(%{}, fn mq ->
+            bd =
+              broker_datas
+              |> Enum.find(fn bd -> bd.broker_name == mq.broker_name end)
+
+            Logger.warning("new consume task for mq: #{inspect(mq)}")
+
+            {:ok, tid} = new_consume_task(task_supervisor, mq, bd, topic, sub, state)
+            {mq, tid}
+          end)
+
+        current_consume_task =
+          consume_tasks
+          |> Map.merge(new_tasks)
+          |> Map.reject(fn {mq, _} -> Map.has_key?(to_stop, mq) end)
+
+        Map.put(acc, topic, {sub, broker_datas, mqs, current_consume_task})
+        acc
+      end
+    )
+    |> then(fn new_consume_info_map ->
+      %State{state | consume_info_map: new_consume_info_map}
+    end)
+  end
+
+  defp do_balance(
+         %State{
            client_id: client_id,
            consume_info_map: consume_info_map,
            registry: registry,
@@ -553,6 +607,64 @@ defmodule ExRocketmq.Consumer do
           Subscription.t(),
           State.t()
         ) :: {:ok, pid()}
+
+  defp new_consume_task(task_supervisor, mq, bd, topic, sub, %State{
+         client_id: cid,
+         registry: registry,
+         broker_dynamic_supervisor: broker_dynamic_supervisor,
+         task_supervisor: task_supervisor,
+         processor: processor,
+         consume_opts: %{
+           group_name: group_name,
+           model: :broadcast,
+           consume_from_where: cfw,
+           consume_timestamp: consume_timestamp,
+           consume_orderly: consume_orderly,
+           post_subscription_when_pull: post_subscription_when_pull,
+           pull_batch_size: pull_batch_size,
+           consume_batch_size: consume_batch_size,
+           max_reconsume_times: max_reconsume_times
+         }
+       }) do
+    inner_consumer =
+      if consume_orderly do
+        InnerConsumer.BroadcastOrder
+      else
+        InnerConsumer.BroadcastConcurrent
+      end
+
+    Task.Supervisor.start_child(
+      task_supervisor,
+      fn ->
+        apply(inner_consumer, :pull_msg, [
+          %ConsumeState{
+            task_id: Util.Random.generate_id("T"),
+            client_id: cid,
+            group_name: group_name,
+            topic: topic,
+            broker_data: bd,
+            registry: registry,
+            broker_dynamic_supervisor: broker_dynamic_supervisor,
+            mq: mq,
+            subscription: sub,
+            consume_from_where: cfw,
+            consume_timestamp: consume_timestamp,
+            post_subscription_when_pull: post_subscription_when_pull,
+            commit_offset_enable: false,
+            commit_offset: 0,
+            pull_batch_size: pull_batch_size,
+            consume_batch_size: consume_batch_size,
+            # use a negative number to indicate that we need to get remote offset
+            next_offset: -1,
+            processor: processor,
+            max_reconsume_times: max_reconsume_times
+          }
+        ])
+      end,
+      restart: :transient
+    )
+  end
+
   defp new_consume_task(task_supervisor, mq, bd, topic, sub, %State{
          client_id: cid,
          registry: registry,

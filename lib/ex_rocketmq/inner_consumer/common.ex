@@ -24,7 +24,7 @@ defmodule ExRocketmq.InnerConsumer.Common do
           non_neg_integer()
         ) ::
           {:ok, non_neg_integer()} | Typespecs.error_t()
-  def get_next_offset(broker, group_name, topic, queue_id, cfw, consume_timestamp) do
+  def get_next_offset(broker, group_name, topic, queue_id, consume_from_where, consume_timestamp) do
     with {:ok, last_offset} <-
            Broker.query_consumer_offset(broker, %QueryConsumerOffset{
              consumer_group: group_name,
@@ -36,7 +36,7 @@ defmodule ExRocketmq.InnerConsumer.Common do
       else
         Logger.warning("no offset record for mq #{topic}-#{queue_id}")
         # no offset record
-        case cfw do
+        case consume_from_where do
           :last_offset ->
             get_last_offset(topic, broker, queue_id)
 

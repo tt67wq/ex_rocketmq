@@ -1,27 +1,24 @@
-defmodule ExRocketmq.InnerConsumer.Concurrent do
+defmodule ExRocketmq.InnerConsumer.BroadcastConcurrent do
   @moduledoc """
-  concurrently mq consumer
+  broadcast mode concurrent mq consumer
   """
-
   alias ExRocketmq.{
-    # Typespecs,
     Broker,
+    InnerConsumer.Common,
     Protocol.PullStatus,
-    Consumer.Processor,
-    InnerConsumer.Common
+    Consumer.Processor
   }
 
   alias ExRocketmq.Models.{
     BrokerData,
     MessageQueue,
-    Subscription,
     ConsumeState,
-    PullMsg,
-    MessageExt
+    Subscription,
+    PullMsg
   }
 
-  require PullStatus
   require Logger
+  require PullStatus
 
   @pull_status_found PullStatus.pull_found()
   @pull_status_no_new_msg PullStatus.pull_no_new_msg()
@@ -63,8 +60,8 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
     pull_msg(%{
       task
       | next_offset: offset,
-        commit_offset: offset,
-        commit_offset_enable: offset > 0
+        commit_offset: 0,
+        commit_offset_enable: false
     })
   end
 
@@ -77,7 +74,6 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
           },
           broker_data: bd,
           next_offset: next_offset,
-          commit_offset_enable: commit_offset_enable,
           post_subscription_when_pull: post_subscription_when_pull,
           subscription: %Subscription{
             sub_string: sub_string,
@@ -85,7 +81,6 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
             expression_type: expression_type
           },
           pull_batch_size: pull_batch_size,
-          commit_offset: commit_offset,
           registry: registry,
           broker_dynamic_supervisor: dynamic_supervisor
         } = pt
@@ -98,22 +93,18 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
       max_msg_nums: pull_batch_size,
       sys_flag:
         Common.build_pullmsg_sys_flag(
-          commit_offset_enable,
+          false,
           post_subscription_when_pull and cfm,
           cfm
         ),
-      commit_offset: commit_offset,
+      commit_offset: 0,
       suspend_timeout_millis: 20_000,
       sub_expression: sub_string,
       expression_type: expression_type
     }
 
     broker =
-      if commit_offset_enable do
-        BrokerData.master_addr(bd)
-      else
-        BrokerData.slave_addr(bd)
-      end
+      BrokerData.slave_addr(bd)
       |> then(fn addr ->
         Broker.get_or_new_broker(
           bd.broker_name,
@@ -165,9 +156,7 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
             {:ok,
              %{
                pt
-               | next_offset: next_begin_offset,
-                 commit_offset: next_begin_offset,
-                 commit_offset_enable: true
+               | next_offset: next_begin_offset
              }, 0}
 
           @pull_status_no_new_msg ->
@@ -202,22 +191,13 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
            topic: topic,
            consume_batch_size: consume_batch_size,
            processor: processor
-         } = pt
+         }
        ) do
     message_exts
     |> Enum.chunk_every(consume_batch_size)
     |> Task.async_stream(fn msgs ->
+      # broadcast mode no need to send msg back
       Processor.process(processor, topic, msgs)
-      |> case do
-        :success ->
-          :ok
-
-        {:retry_later, delay_level_map} ->
-          # send msg back
-          msgs
-          |> Enum.map(&%{&1 | delay_level: Map.get(delay_level_map, &1.msg_id, 1)})
-          |> Common.send_msgs_back(pt)
-      end
     end)
     |> Stream.run()
   end
