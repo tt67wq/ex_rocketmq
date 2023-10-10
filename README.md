@@ -204,7 +204,7 @@ More examples can be found in [examples](https://github.com/tt67wq/ex_rocketmq/t
 ## Roadmap
 - [X] Support transactional message producer;
 - [X] Support orderly message consume;
-- [ ] Support broadcast message consume;
+- [X] Support broadcast message consume;
 - [ ] Support trace report;
 - [ ] Support client stats collect;
 - [ ] Support request-reply mode;
