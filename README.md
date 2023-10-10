@@ -202,7 +202,9 @@ Process.sleep(:infinity)
 More examples can be found in [examples](https://github.com/tt67wq/ex_rocketmq/tree/master/examples)
 
 ## Roadmap
+- [X] Support normal message producer;
 - [X] Support transactional message producer;
+- [X] Support concurrent message consumer;
 - [X] Support orderly message consume;
 - [X] Support broadcast message consume;
 - [ ] Support trace report;
