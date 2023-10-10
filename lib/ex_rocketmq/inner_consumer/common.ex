@@ -126,7 +126,7 @@ defmodule ExRocketmq.InnerConsumer.Common do
 
     msgs
     |> Task.async_stream(fn msg ->
-      Logger.info("send msg back: #{inspect(msg)}")
+      Logger.debug("send msg back: #{msg.message.topic}-#{msg.commit_log_offset}")
 
       Broker.consumer_send_msg_back(broker, %ConsumerSendMsgBack{
         group: group_name,
@@ -145,6 +145,7 @@ defmodule ExRocketmq.InnerConsumer.Common do
           msg
       end
     end)
+    |> Enum.map(fn {_, val} -> val end)
     |> Enum.reject(&is_nil(&1))
     |> tap(fn msgs ->
       if length(msgs) > 0 do
