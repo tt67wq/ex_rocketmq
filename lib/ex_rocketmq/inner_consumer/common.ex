@@ -146,6 +146,12 @@ defmodule ExRocketmq.InnerConsumer.Common do
       end
     end)
     |> Enum.reject(&is_nil(&1))
+    |> tap(fn msgs ->
+      if length(msgs) > 0 do
+        Logger.warning("send msgs back failed: #{inspect(msgs)}")
+        Process.sleep(5000)
+      end
+    end)
     |> send_msgs_back(pt)
   end
 

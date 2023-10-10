@@ -280,11 +280,13 @@ defmodule ExRocketmq.InnerConsumer.Order do
           |> Enum.split_with(fn %MessageExt{reconsume_times: rt} -> rt <= max_reconsume_times end)
 
         if length(to_sendback) > 0 do
-          Common.async_send_msgs_back(to_sendback, pt)
+          Common.send_msgs_back(to_sendback, pt)
         end
 
         if length(to_retry) > 0 do
           do_consume([to_retry | tail], pt)
+        else
+          do_consume(tail, pt)
         end
     end
   end
