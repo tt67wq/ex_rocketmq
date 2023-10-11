@@ -46,9 +46,9 @@ defmodule ExRocketmq.Models.Message do
   end
 
   @spec encode_properties(t()) :: binary()
-  def encode_properties(%{properties: nil}), do: ""
+  def encode_properties(%__MODULE__{properties: nil}), do: ""
 
-  def encode_properties(%{properties: properties}) do
+  def encode_properties(%__MODULE__{properties: properties}) do
     properties
     |> Enum.map(fn {k, v} -> [k, @property_kv_sep, v, @property_sep] |> IO.iodata_to_binary() end)
     |> IO.iodata_to_binary()
@@ -71,6 +71,32 @@ defmodule ExRocketmq.Models.Message do
           Map.put(acc, k, v)
       end
     )
+  end
+
+  @spec get_property(t(), String.t(), String.t() | nil) :: String.t() | nil
+  def get_property(msg, key, default \\ "")
+
+  def get_property(%__MODULE__{properties: nil}, _key, _default), do: nil
+
+  def get_property(%__MODULE__{properties: properties}, key, default),
+    do: Map.get(properties, key, default)
+
+  @spec with_property(t(), String.t(), String.t()) :: t()
+  def with_property(%__MODULE__{properties: nil} = msg, key, value) do
+    %{msg | properties: %{key => value}}
+  end
+
+  def with_property(%__MODULE__{properties: properties} = msg, key, value) do
+    %{msg | properties: Map.put(properties, key, value)}
+  end
+
+  @spec with_properties(t(), Typespecs.properties()) :: t()
+  def with_properties(%__MODULE__{properties: nil} = msg, properties) do
+    %{msg | properties: properties}
+  end
+
+  def with_properties(%__MODULE__{properties: properties} = msg, properties) do
+    %{msg | properties: Map.merge(properties, properties)}
   end
 end
 

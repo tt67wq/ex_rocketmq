@@ -81,19 +81,42 @@ defmodule DemoProducer do
 
   def run(opts) do
     get_msg()
-    |> Enum.chunk_every(4)
-    |> Enum.each(fn msgs ->
-      to_emit =
-        msgs
-        |> Enum.map(fn msg ->
-          %Message{topic: @topic, body: msg}
-        end)
-
-      Producer.send_sync(:producer, to_emit)
+    |> Enum.each(fn msg ->
+      Producer.send_transaction_msg(:producer, %Message{topic: @topic, body: msg})
     end)
 
     Process.sleep(1000)
     run(opts)
+  end
+end
+
+defmodule MockTransaction do
+  @moduledoc """
+  mock transaction implementation for test
+  """
+
+  @behaviour ExRocketmq.Producer.Transaction
+
+  require ExRocketmq.Protocol.Transaction
+  require Logger
+
+  defstruct []
+
+  @type t :: %__MODULE__{}
+
+  def new(), do: %__MODULE__{}
+
+  def execute_local(_, msg) do
+    Logger.info(
+      "execute local transaction for #{inspect(msg)} in mock transaction implementation"
+    )
+
+    {:ok, :commit}
+  end
+
+  def check_local(_, msg) do
+    Logger.info("check local transaction for #{inspect(msg)} in mock transaction implementation")
+    {:ok, :commit}
   end
 end
 
@@ -113,6 +136,7 @@ Supervisor.start_link(
       group_name: "GID_POETRY",
       namesrvs: :namesrvs,
       trace_enable: true,
+      transaction_listener: MockTransaction.new(),
       opts: [
         name: :producer
       ]

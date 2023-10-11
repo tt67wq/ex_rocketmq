@@ -91,7 +91,6 @@ defmodule ExRocketmq.Models.SendMsg do
 
     @type t :: %__MODULE__{
             status: non_neg_integer(),
-            msg_id: String.t(),
             queue: ExRocketmq.Models.MessageQueue.t(),
             queue_offset: non_neg_integer(),
             transaction_id: String.t(),
@@ -101,7 +100,6 @@ defmodule ExRocketmq.Models.SendMsg do
           }
 
     defstruct status: 0,
-              msg_id: "",
               queue: %ExRocketmq.Models.MessageQueue{},
               queue_offset: 0,
               transaction_id: "",
@@ -126,12 +124,10 @@ defmodule ExRocketmq.Models.SendMsg do
           ext_fields = Packet.packet(pkt, :ext_fields)
           region_id = Map.get(ext_fields, "MSG_REGION", "DefaultRegion")
           trace = Map.get(ext_fields, "TRACE_ON", "")
-          msg_id = Map.get(ext_fields, "msgId", "")
 
           {:ok,
            %__MODULE__{
              status: status,
-             msg_id: msg_id,
              queue: %ExRocketmq.Models.MessageQueue{
                # topic and broker_name will be set later
                topic: "",

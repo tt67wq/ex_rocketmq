@@ -21,7 +21,8 @@ defmodule ExRocketmq.Producer do
             },
             selector: ExRocketmq.Producer.MqSelector.t(),
             compress: keyword(),
-            transaction_listener: ExRocketmq.Producer.Transaction.t()
+            transaction_listener: ExRocketmq.Producer.Transaction.t(),
+            tracer: pid() | nil
           }
 
     defstruct client_id: "",
@@ -34,8 +35,11 @@ defmodule ExRocketmq.Producer do
               publish_info_map: %{},
               selector: nil,
               compress: nil,
-              transaction_listener: ExRocketmq.Producer.MockTransaction.new()
+              transaction_listener: nil,
+              tracer: nil
   end
+
+  require ExRocketmq.Protocol.MsgType
 
   alias ExRocketmq.{
     Typespecs,
@@ -44,7 +48,9 @@ defmodule ExRocketmq.Producer do
     Broker,
     Producer.MqSelector,
     Compressor,
-    Remote.Packet
+    Remote.Packet,
+    Tracer,
+    Exception
   }
 
   alias ExRocketmq.Models.{
@@ -58,7 +64,9 @@ defmodule ExRocketmq.Producer do
     ProducerData,
     MessageId,
     EndTransaction,
-    CheckTransactionState
+    CheckTransactionState,
+    Trace,
+    TraceItem
   }
 
   alias ExRocketmq.Protocol.{
@@ -66,7 +74,9 @@ defmodule ExRocketmq.Producer do
     Flag,
     Request,
     Response,
-    Transaction
+    Transaction,
+    SendStatus,
+    MsgType
   }
 
   require Logger
@@ -76,6 +86,7 @@ defmodule ExRocketmq.Producer do
   require Request
   require Transaction
   require Packet
+  require SendStatus
 
   use GenServer
 
@@ -125,8 +136,14 @@ defmodule ExRocketmq.Producer do
     ],
     transaction_listener: [
       type: :any,
-      doc: "The transaction listener of the producer",
-      default: ExRocketmq.Producer.MockTransaction.new()
+      doc:
+        "The transaction listener of the producer, must implement `ExRocketmq.Producer.Transaction`, see `ExRocketmq.Producer.Transaction` for more details",
+      required: false
+    ],
+    trace_enable: [
+      type: :boolean,
+      default: false,
+      doc: "The trace enable of the producer"
     ],
     opts: [
       type: :keyword_list,
@@ -148,6 +165,7 @@ defmodule ExRocketmq.Producer do
 
   # resp
   @resp_success Response.resp_success()
+  @send_success SendStatus.send_ok()
 
   # transaction type
   @transaction_not_type Transaction.not_type()
@@ -156,6 +174,11 @@ defmodule ExRocketmq.Producer do
 
   # request
   @req_check_transaction_state Request.req_check_transaction_state()
+
+  # msg type
+  @msg_type_normal MsgType.normal_msg()
+  @msg_type_trans_half MsgType.trans_msg_half()
+  @msg_type_trans_commit MsgType.trans_msg_commit()
 
   @type producer_opts_schema_t :: [unquote(NimbleOptions.option_typespec(@producer_opts_schema))]
   @type publish_map :: %{
@@ -236,6 +259,13 @@ defmodule ExRocketmq.Producer do
     {:ok, task_supervisor} = Task.Supervisor.start_link()
     {:ok, broker_dynamic_supervisor} = DynamicSupervisor.start_link([])
 
+    {:ok, tracer} =
+      if opts[:trace_enable] do
+        Tracer.start_link(namesrvs: opts[:namesrvs])
+      else
+        {:ok, nil}
+      end
+
     {:ok,
      %State{
        client_id: Util.ClientId.get(),
@@ -248,14 +278,16 @@ defmodule ExRocketmq.Producer do
        publish_info_map: %{},
        selector: opts[:selector],
        compress: opts[:compress],
-       transaction_listener: opts[:transaction_listener]
+       transaction_listener: opts[:transaction_listener],
+       tracer: tracer
      }, {:continue, :on_start}}
   end
 
   def terminate(reason, %State{
         uniqid: uniqid,
         broker_dynamic_supervisor: broker_dynamic_supervisor,
-        task_supervisor: task_supervisor
+        task_supervisor: task_supervisor,
+        tracer: tracer
       }) do
     Logger.info("producer terminate, reason: #{inspect(reason)}")
 
@@ -276,6 +308,9 @@ defmodule ExRocketmq.Producer do
     end)
 
     DynamicSupervisor.stop(broker_dynamic_supervisor)
+
+    # stop tracer
+    unless is_nil(tracer), do: Tracer.stop(tracer)
   end
 
   def handle_continue(:on_start, state) do
@@ -285,8 +320,19 @@ defmodule ExRocketmq.Producer do
   end
 
   def handle_call({:send_sync, msgs}, _, state) do
-    with {:ok, {broker_pid, req, msg, pmap}} <- prepare_send_msg_request(msgs, state),
+    begin_at = System.system_time(:millisecond)
+
+    with {:ok,
+          %{
+            broker_pid: broker_pid,
+            req: req,
+            msg: msg,
+            publish_info: pmap,
+            broker_data: bd
+          }} <-
+           prepare_send_msg_request(msgs, state),
          {:ok, resp} <- Broker.sync_send_message(broker_pid, req, msg.body) do
+      send_trace(msg, resp, begin_at, bd, @msg_type_normal, state)
       {:reply, {:ok, resp}, %{state | publish_info_map: pmap}}
     else
       {:error, reason} = error ->
@@ -299,6 +345,9 @@ defmodule ExRocketmq.Producer do
     end
   end
 
+  def handle_call({:send_in_transaction, _msg}, _, %State{transaction_listener: nil} = state),
+    do: {:reply, {:error, :no_transaction_listener}, state}
+
   def handle_call(
         {:send_in_transaction, msg},
         _,
@@ -309,23 +358,22 @@ defmodule ExRocketmq.Producer do
           broker_dynamic_supervisor: broker_dynamic_supervisor
         } = state
       ) do
-    with msg <- %{
-           msg
-           | properties:
-               Map.merge(msg.properties, %{
-                 @property_transaction_prepared => "true",
-                 @property_producer_group => group_name
-               })
-         },
-         {:ok, {broker_pid, req, msg, pmap}} <- prepare_send_msg_request([msg], state),
+    begin_at = System.system_time(:millisecond)
+
+    with msg <-
+           Message.with_properties(msg, %{
+             @property_transaction_prepared => "true",
+             @property_producer_group => group_name
+           }),
+         {:ok, %{broker_pid: broker_pid, req: req, msg: msg, publish_info: pmap, broker_data: bd}} <-
+           prepare_send_msg_request([msg], state),
          {:ok, %SendMsg.Response{queue: q} = resp} <-
            Broker.sync_send_message(broker_pid, req, msg.body),
+         :ok <- send_trace(msg, resp, begin_at, bd, @msg_type_trans_half, state),
+         begin_at = System.system_time(:millisecond),
          :ok <- do_assert(fn -> resp.status == @resp_success end, %{"status" => resp.status}),
          {:ok, %MessageId{} = message_id} <- get_msg_id(resp),
-         msg <- %{
-           msg
-           | properties: Map.put(msg.properties, @property_transaction_id, resp.transaction_id)
-         },
+         msg <- Message.with_property(msg, @property_transaction_id, resp.transaction_id),
          msg <- set_tranaction_id(msg),
          {:ok, transaction_state} <- ExRocketmq.Producer.Transaction.execute_local(tl, msg),
          req <- %EndTransaction{
@@ -333,11 +381,12 @@ defmodule ExRocketmq.Producer do
            tran_state_table_offset: resp.queue_offset,
            commit_log_offset: message_id.offset,
            commit_or_rollback: transaction_state_to_type(transaction_state),
-           msg_id: resp.msg_id,
+           msg_id:
+             Message.get_property(msg, @property_unique_client_msgid_key, resp.offset_msg_id),
            transaction_id: resp.transaction_id
          },
          {:ok, {broker_datas, _mqs}} <- Map.fetch(pmap, msg.topic),
-         {:ok, %BrokerData{} = bd} <- get_broker_data(broker_datas, q),
+         bd <- get_broker_data!(broker_datas, q),
          broker_pid <-
            Broker.get_or_new_broker(
              bd.broker_name,
@@ -346,6 +395,7 @@ defmodule ExRocketmq.Producer do
              broker_dynamic_supervisor
            ),
          :ok <- Broker.end_transaction(broker_pid, req) do
+      send_trace(msg, resp, begin_at, bd, @msg_type_trans_commit, state)
       {:reply, {:ok, resp, transaction_state}, %{state | publish_info_map: pmap}}
     else
       {:error, reason} = error ->
@@ -359,7 +409,8 @@ defmodule ExRocketmq.Producer do
   end
 
   def handle_cast({:send_oneway, msgs}, state) do
-    with {:ok, {broker_pid, req, msg, pmap}} <- prepare_send_msg_request(msgs, state),
+    with {:ok, %{broker_pid: broker_pid, req: req, msg: msg, publish_info: pmap}} <-
+           prepare_send_msg_request(msgs, state),
          :ok <- Broker.one_way_send_message(broker_pid, req, msg.body) do
       {:noreply, %{state | publish_info_map: pmap}}
     end
@@ -469,8 +520,9 @@ defmodule ExRocketmq.Producer do
           commit_log_offset: header.commit_log_offset,
           commit_or_rollback: transaction_state_to_type(transaction_state),
           from_transaction_check: true,
-          msg_id: Map.get(msg.properties, @property_unique_client_msgid_key, msg_ext.msg_id),
-          transaction_id: Map.get(msg.properties, @property_transaction_id, header.transaction_id)
+          msg_id: Message.get_property(msg, @property_unique_client_msgid_key, msg_ext.msg_id),
+          transaction_id:
+            Message.get_property(msg, @property_transaction_id, header.transaction_id)
         }
 
         Broker.end_transaction(broker_pid, req)
@@ -481,7 +533,15 @@ defmodule ExRocketmq.Producer do
   end
 
   @spec prepare_send_msg_request([Message.t()], State.t()) ::
-          {:ok, {pid(), SendMsg.Request.t(), Message.t(), publish_map()}} | {:error, any()}
+          {:ok,
+           %{
+             broker_pid: pid(),
+             req: SendMsg.Request.t(),
+             msg: Message.t(),
+             publish_info: publish_map(),
+             broker_data: BrokerData.t()
+           }}
+          | {:error, any()}
   defp prepare_send_msg_request(msgs, %State{
          group_name: group_name,
          publish_info_map: pmap,
@@ -514,11 +574,11 @@ defmodule ExRocketmq.Producer do
            max_reconsume_times: 3,
            unit_mode: false,
            batch: msg.batch,
-           reply: Map.get(msg.properties, @property_msg_type, "") == "reply",
+           reply: Message.get_property(msg, @property_msg_type, "") == "reply",
            default_topic: "TBW102",
            default_topic_queue_num: 4
          },
-         {:ok, bd} <- get_broker_data(broker_datas, mq),
+         bd <- get_broker_data!(broker_datas, mq),
          broker_pid <-
            Broker.get_or_new_broker(
              bd.broker_name,
@@ -526,18 +586,27 @@ defmodule ExRocketmq.Producer do
              registry,
              broker_dynamic_supervisor
            ) do
-      {:ok, {broker_pid, req, msg, pmap}}
+      {:ok,
+       %{
+         broker_pid: broker_pid,
+         req: req,
+         msg: msg,
+         publish_info: pmap,
+         broker_data: bd
+       }}
     end
   end
 
-  @spec get_broker_data(list(BrokerData.t()), MessageQueue.t()) ::
-          {:ok, BrokerData.t()} | {:error, any()}
-  defp get_broker_data(broker_datas, mq) do
+  @spec get_broker_data!(list(BrokerData.t()), MessageQueue.t()) :: BrokerData.t()
+  defp get_broker_data!(broker_datas, mq) do
     broker_datas
     |> Enum.find(&(&1.broker_name == mq.broker_name))
     |> case do
-      nil -> {:error, "broker data not found, broker_name: #{mq.broker_name}"}
-      bd -> {:ok, bd}
+      nil ->
+        raise Exception.new("broker data not found", %{broker_name: mq.broker_name})
+
+      bd ->
+        bd
     end
   end
 
@@ -596,14 +665,14 @@ defmodule ExRocketmq.Producer do
   defp encode_batch([msg]), do: msg
 
   @spec set_uniqid(Message.t(), pid()) :: Message.t()
-  defp set_uniqid(%Message{batch: false, properties: properties} = msg, uniqid) do
-    case Map.get(properties, @property_unique_client_msgid_key) do
+  defp set_uniqid(%Message{batch: false} = msg, uniqid) do
+    case Message.get_property(msg, @property_unique_client_msgid_key) do
       nil ->
-        properties =
-          properties
-          |> Map.put(@property_unique_client_msgid_key, Util.UniqId.get_uniq_id(uniqid))
-
-        %{msg | properties: properties}
+        Message.with_property(
+          msg,
+          @property_unique_client_msgid_key,
+          Util.UniqId.get_uniq_id(uniqid)
+        )
 
       _ ->
         msg
@@ -648,7 +717,7 @@ defmodule ExRocketmq.Producer do
   defp get_msg_id(%SendMsg.Response{offset_msg_id: offset_msg_id}) when offset_msg_id != "",
     do: MessageId.decode(offset_msg_id)
 
-  defp get_msg_id(%SendMsg.Response{msg_id: msg_id}), do: MessageId.decode(msg_id)
+  defp get_msg_id(_), do: {:error, :no_msg_id}
 
   @spec transaction_state_to_type(Typespecs.transaction_state()) :: Typespecs.transaction_type()
   defp transaction_state_to_type(transaction_state) do
@@ -667,5 +736,68 @@ defmodule ExRocketmq.Producer do
       {:ok, _} = val -> val
       _ -> {:error, "topic not in publish info"}
     end
+  end
+
+  @spec send_trace(
+          msg :: Message.t(),
+          resp :: SendMsg.Response.t(),
+          begin_at :: non_neg_integer(),
+          broker_data :: BrokerData.t(),
+          msg_type :: non_neg_integer(),
+          state :: State.t()
+        ) :: :ok
+  defp send_trace(_, _, _, _, _, %State{tracer: nil}), do: :ok
+
+  defp send_trace(
+         %Message{
+           topic: topic,
+           body: body
+         } = msg,
+         %SendMsg.Response{
+           status: status,
+           region_id: region_id,
+           offset_msg_id: offset_msg_id
+         },
+         begin_at,
+         bd,
+         msg_type,
+         %State{
+           tracer: tracer,
+           group_name: group_name,
+           uniqid: uniqid
+         }
+       ) do
+    trace = %Trace{
+      type: :pub,
+      timestamp: System.system_time(:millisecond),
+      region_id: region_id,
+      region_name: "",
+      group_name: group_name,
+      cost_time: System.system_time(:millisecond) - begin_at,
+      success?: status == @send_success,
+      request_id: Util.UniqId.get_uniq_id(uniqid),
+      items: [
+        %TraceItem{
+          topic: topic,
+          tags: Message.get_property(msg, "TAGS", ""),
+          keys: Message.get_property(msg, "KEYS", ""),
+          store_host: BrokerData.master_addr(bd),
+          client_host: ip_addr(),
+          body_length: byte_size(body),
+          msg_type: msg_type,
+          msg_id: Message.get_property(msg, @property_unique_client_msgid_key, ""),
+          offset_msg_id: offset_msg_id,
+          store_time: System.system_time(:millisecond)
+        }
+      ]
+    }
+
+    Tracer.send_trace(tracer, trace)
+  end
+
+  @spec ip_addr() :: String.t()
+  defp ip_addr() do
+    {a, b, c, d} = Util.Network.get_local_ipv4_address()
+    "#{a}.#{b}.#{c}.#{d}"
   end
 end

@@ -5,12 +5,18 @@ defmodule ExRocketmq.Exception do
   """
   defexception [:message, :details]
 
-  def message(%__MODULE__{} = exception) do
-    pfx = "** (Exception) "
+  @spec new(String.t() | nil, any()) :: %__MODULE__{}
+  def new(message, details \\ nil) do
+    %__MODULE__{message: message, details: details}
+  end
 
-    case exception.message do
-      nil -> pfx <> details(exception.details)
-      val -> pfx <> val <> details(exception.details)
+  @spec message(%__MODULE__{}) :: String.t()
+  def message(%__MODULE__{message: message, details: details}) do
+    pfx = "** (ExRocketmq.Exception) "
+
+    case message do
+      nil -> pfx <> details(details)
+      val -> pfx <> val <> details(details)
     end
   end
 
