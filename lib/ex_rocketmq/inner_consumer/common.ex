@@ -2,7 +2,14 @@ defmodule ExRocketmq.InnerConsumer.Common do
   @moduledoc """
   some funcs used by both orderly and concurrently consumer
   """
-  alias ExRocketmq.{Typespecs, Broker, Util}
+  alias ExRocketmq.{
+    Typespecs,
+    Broker,
+    Util,
+    Consumer.Processor,
+    Tracer,
+    Protocol.ConsumeReturnType
+  }
 
   alias ExRocketmq.Models.{
     QueryConsumerOffset,
@@ -10,10 +17,19 @@ defmodule ExRocketmq.InnerConsumer.Common do
     SearchOffset,
     ConsumeState,
     ConsumerSendMsgBack,
-    BrokerData
+    BrokerData,
+    Trace,
+    TraceItem,
+    MessageExt,
+    Message
   }
 
   require Logger
+  require ConsumeReturnType
+
+  @success_return ConsumeReturnType.success()
+  @failed_return ConsumeReturnType.failed()
+  @exception_return ConsumeReturnType.exception()
 
   @spec get_next_offset(
           pid(),
@@ -161,4 +177,82 @@ defmodule ExRocketmq.InnerConsumer.Common do
       send_msgs_back(msgs, pt)
     end)
   end
+
+  @spec process_with_trace(
+          pid(),
+          Processor.t(),
+          Typespecs.group_name(),
+          Typespecs.topic(),
+          list(MessageExt.t())
+        ) :: Processor.consume_result() | {:error, term()}
+  def process_with_trace(nil, processor, _group, topic, msgs) do
+    Processor.process(processor, topic, msgs)
+  end
+
+  def process_with_trace(tracer, processor, group, topic, msgs) do
+    items =
+      msgs
+      |> Enum.flat_map(fn %MessageExt{
+                            message: m,
+                            msg_id: msg_id,
+                            store_timestamp: store_timestamp,
+                            store_size: store_size,
+                            reconsume_times: reconsume_times,
+                            store_host: store_host
+                          } ->
+        m
+        |> Message.get_property("TRACE_ON")
+        |> case do
+          "false" ->
+            []
+
+          _ ->
+            [
+              %TraceItem{
+                topic: topic,
+                msg_id: msg_id,
+                tags: Message.get_property(m, "TAGS", ""),
+                keys: Message.get_property(m, "KEYS", ""),
+                store_time: store_timestamp,
+                body_length: store_size,
+                retry_times: reconsume_times,
+                client_host: Util.Network.local_ip_addr(),
+                store_host: store_host
+              }
+            ]
+        end
+      end)
+
+    before_trace = %Trace{
+      type: :sub_before,
+      timestamp: System.system_time(:millisecond),
+      group_name: group,
+      success?: true,
+      items: items
+    }
+
+    begin_at = System.system_time(:millisecond)
+
+    Tracer.send_trace(tracer, before_trace)
+
+    ret = Processor.process(processor, topic, msgs)
+
+    after_trace = %Trace{
+      type: :sub_after,
+      timestamp: System.system_time(:millisecond),
+      group_name: group,
+      success?: ret == :success,
+      cost_time: System.system_time(:millisecond) - begin_at,
+      code: process_code(ret),
+      items: items
+    }
+
+    Tracer.send_trace(tracer, after_trace)
+
+    ret
+  end
+
+  defp process_code({:error, _}), do: @exception_return
+  defp process_code(:success), do: @success_return
+  defp process_code(_), do: @failed_return
 end

@@ -23,6 +23,7 @@ defmodule ExRocketmq.Consumer do
                 %{Models.MessageQueue.t() => pid()}
               }
             },
+            tracer: pid(),
             consume_opts: %{
               group_name: Typespecs.group_name(),
               retry_topic: Typespecs.topic(),
@@ -46,6 +47,7 @@ defmodule ExRocketmq.Consumer do
               registry: nil,
               consume_info_map: %{},
               processor: nil,
+              tracer: nil,
               consume_opts: %{
                 group_name: "",
                 retry_topic: "",
@@ -73,7 +75,8 @@ defmodule ExRocketmq.Consumer do
     Protocol.Request,
     Protocol.PullStatus,
     Remote.Packet,
-    InnerConsumer
+    InnerConsumer,
+    Tracer
   }
 
   alias ExRocketmq.Models.{
@@ -164,6 +167,11 @@ defmodule ExRocketmq.Consumer do
       doc: "The max times to reconsume message",
       default: 16
     ],
+    trace_enable: [
+      type: :boolean,
+      doc: "Whether to enable trace collection",
+      default: false
+    ],
     opts: [
       type: :keyword_list,
       default: [],
@@ -219,6 +227,14 @@ defmodule ExRocketmq.Consumer do
         {topic, {message_selector_to_subscription(topic, msg_selector), [], [], %{}}}
       end)
 
+    # trace
+    {:ok, tracer} =
+      if opts[:trace_enable] do
+        Tracer.start_link(namesrvs: opts[:namesrvs])
+      else
+        {:ok, nil}
+      end
+
     {:ok,
      %State{
        client_id: Util.ClientId.get(),
@@ -228,6 +244,7 @@ defmodule ExRocketmq.Consumer do
        registry: registry,
        consume_info_map: cmap,
        processor: opts[:processor],
+       tracer: tracer,
        consume_opts: %{
          group_name: with_namespace(opts[:consumer_group], opts[:namespace]),
          retry_topic: retry_topic(opts[:consumer_group]),
@@ -245,7 +262,11 @@ defmodule ExRocketmq.Consumer do
      }, {:continue, :on_start}}
   end
 
-  def terminate(reason, %State{broker_dynamic_supervisor: ds}) do
+  def terminate(reason, %State{
+        broker_dynamic_supervisor: ds,
+        tracer: tracer,
+        task_supervisor: task_supervisor
+      }) do
     Logger.info("consumer terminate, reason: #{inspect(reason)}")
 
     # stop broker
@@ -253,6 +274,18 @@ defmodule ExRocketmq.Consumer do
     |> Util.SupervisorHelper.all_pids_under_supervisor()
     |> Enum.each(fn pid ->
       DynamicSupervisor.terminate_child(ds, pid)
+    end)
+
+    # stop trace
+    unless is_nil(tracer) do
+      Tracer.stop(tracer)
+    end
+
+    # stop all tasks
+    task_supervisor
+    |> Task.Supervisor.children()
+    |> Enum.each(fn pid ->
+      Task.Supervisor.terminate_child(task_supervisor, pid)
     end)
   end
 
@@ -671,6 +704,7 @@ defmodule ExRocketmq.Consumer do
          broker_dynamic_supervisor: broker_dynamic_supervisor,
          task_supervisor: task_supervisor,
          processor: processor,
+         tracer: tracer,
          consume_opts: %{
            group_name: group_name,
            model: :cluster,
@@ -703,6 +737,7 @@ defmodule ExRocketmq.Consumer do
             registry: registry,
             broker_dynamic_supervisor: broker_dynamic_supervisor,
             mq: mq,
+            tracer: tracer,
             subscription: sub,
             consume_from_where: cfw,
             consume_timestamp: consume_timestamp,

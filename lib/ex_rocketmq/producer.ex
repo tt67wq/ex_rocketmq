@@ -763,8 +763,7 @@ defmodule ExRocketmq.Producer do
          msg_type,
          %State{
            tracer: tracer,
-           group_name: group_name,
-           uniqid: uniqid
+           group_name: group_name
          }
        ) do
     trace = %Trace{
@@ -775,14 +774,13 @@ defmodule ExRocketmq.Producer do
       group_name: group_name,
       cost_time: System.system_time(:millisecond) - begin_at,
       success?: status == @send_success,
-      request_id: Util.UniqId.get_uniq_id(uniqid),
       items: [
         %TraceItem{
           topic: topic,
           tags: Message.get_property(msg, "TAGS", ""),
           keys: Message.get_property(msg, "KEYS", ""),
           store_host: BrokerData.master_addr(bd),
-          client_host: ip_addr(),
+          client_host: Util.Network.local_ip_addr(),
           body_length: byte_size(body),
           msg_type: msg_type,
           msg_id: Message.get_property(msg, @property_unique_client_msgid_key, ""),
@@ -793,11 +791,5 @@ defmodule ExRocketmq.Producer do
     }
 
     Tracer.send_trace(tracer, trace)
-  end
-
-  @spec ip_addr() :: String.t()
-  defp ip_addr() do
-    {a, b, c, d} = Util.Network.get_local_ipv4_address()
-    "#{a}.#{b}.#{c}.#{d}"
   end
 end

@@ -7,7 +7,6 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
     # Typespecs,
     Broker,
     Protocol.PullStatus,
-    Consumer.Processor,
     InnerConsumer.Common
   }
 
@@ -201,13 +200,15 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
          %ConsumeState{
            topic: topic,
            consume_batch_size: consume_batch_size,
-           processor: processor
+           group_name: group_name,
+           processor: processor,
+           tracer: tracer
          } = pt
        ) do
     message_exts
     |> Enum.chunk_every(consume_batch_size)
     |> Task.async_stream(fn msgs ->
-      Processor.process(processor, topic, msgs)
+      Common.process_with_trace(tracer, processor, group_name, topic, msgs)
       |> case do
         :success ->
           :ok

@@ -11,6 +11,12 @@ defmodule ExRocketmq.Util.Network do
     end
   end
 
+  @spec local_ip_addr() :: String.t()
+  def local_ip_addr() do
+    {a, b, c, d} = get_local_ipv4_address()
+    "#{a}.#{b}.#{c}.#{d}"
+  end
+
   @spec get_local_ipv4_address() :: :socket.in_addr()
   def get_local_ipv4_address do
     # 获取本地 IP 地址列表

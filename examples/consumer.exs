@@ -52,6 +52,7 @@ Supervisor.start_link(
      namesrvs: :namesrvs,
      processor: MyProcessor.new(),
      subscriptions: %{"POETRY" => MsgSelector.new(:tag, "*")},
+     trace_enable: true,
      opts: [
        name: :consumer
      ]}

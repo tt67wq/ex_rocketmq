@@ -85,7 +85,7 @@ defmodule ExRocketmq.Models.Trace do
         items: items
       }) do
     items
-    |> Enum.map_join(@content_spliter, fn x ->
+    |> Enum.map_join(@field_spliter, fn x ->
       [
         "SubBefore",
         "#{ts}",
@@ -97,8 +97,8 @@ defmodule ExRocketmq.Models.Trace do
         nullwrap(x.keys),
         x.client_host
       ]
+      |> Enum.join(@content_spliter)
     end)
-    |> Enum.join(@field_spliter)
   end
 
   def encode(%__MODULE__{
@@ -112,7 +112,7 @@ defmodule ExRocketmq.Models.Trace do
         items: items
       }) do
     items
-    |> Enum.map_join(@content_spliter, fn x ->
+    |> Enum.map_join(@field_spliter, fn x ->
       [
         "SubAfter",
         request_id,
@@ -124,8 +124,8 @@ defmodule ExRocketmq.Models.Trace do
         "#{ts}",
         group_name!(group_name)
       ]
+      |> Enum.join(@content_spliter)
     end)
-    |> Enum.join(@field_spliter)
   end
 
   defp group_name!(group_name) do

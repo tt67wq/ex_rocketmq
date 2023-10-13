@@ -10,6 +10,7 @@ defmodule ExRocketmq.Tracer do
 
     defstruct client_id: nil,
               namesrvs: nil,
+              uniq_id_provider: nil,
               broker_dynamic_supervisor: nil,
               registry: nil,
               broker_datas: [],
@@ -19,6 +20,7 @@ defmodule ExRocketmq.Tracer do
 
     @type t :: %__MODULE__{
             client_id: String.t(),
+            uniq_id_provider: pid(),
             namesrvs: pid() | atom(),
             broker_dynamic_supervisor: pid(),
             registry: atom(),
@@ -97,10 +99,13 @@ defmodule ExRocketmq.Tracer do
     {:ok, dynamic_supervisor} = DynamicSupervisor.start_link([])
     {:ok, task_supervisor} = Task.Supervisor.start_link()
 
+    {:ok, uniqid_provider} = Util.UniqId.start_link()
+
     {:ok,
      %State{
        client_id: Util.ClientId.get(),
        namesrvs: opts[:namesrvs],
+       uniq_id_provider: uniqid_provider,
        broker_dynamic_supervisor: dynamic_supervisor,
        registry: registry,
        broker_datas: [],
@@ -137,12 +142,19 @@ defmodule ExRocketmq.Tracer do
     {:noreply, state}
   end
 
-  def handle_cast({:send_trace, trace}, %State{buffer: buffer} = state) do
+  def handle_cast(
+        {:send_trace, trace},
+        %State{buffer: buffer, uniq_id_provider: uniq_id_provider} = state
+      ) do
+    trace = %Trace{trace | request_id: Util.UniqId.get_uniq_id(uniq_id_provider)}
     state = %{state | buffer: [trace | buffer]}
 
     state =
       if Enum.count(buffer) + 1 >= @emit_threshold do
-        emit_trace(buffer, state)
+        Task.start(fn ->
+          emit_trace(buffer, state)
+        end)
+
         %{state | buffer: []}
       else
         state
@@ -247,7 +259,8 @@ defmodule ExRocketmq.Tracer do
     Broker.sync_send_message(broker, req, msg.body)
     |> case do
       {:ok, _} ->
-        Logger.debug("emit trace success")
+        # Logger.debug("emit trace success")
+        :ok
 
       {:error, reason} ->
         Logger.error("emit trace error: #{inspect(reason)}")

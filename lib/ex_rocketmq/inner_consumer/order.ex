@@ -6,8 +6,7 @@ defmodule ExRocketmq.InnerConsumer.Order do
   alias ExRocketmq.{
     Broker,
     Protocol.PullStatus,
-    InnerConsumer.Common,
-    Consumer.Processor
+    InnerConsumer.Common
   }
 
   alias ExRocketmq.Models.{
@@ -259,11 +258,13 @@ defmodule ExRocketmq.InnerConsumer.Order do
          [msgs | tail],
          %ConsumeState{
            topic: topic,
+           group_name: group_name,
            processor: processor,
+           tracer: tracer,
            max_reconsume_times: max_reconsume_times
          } = pt
        ) do
-    Processor.process(processor, topic, msgs)
+    Common.process_with_trace(tracer, processor, group_name, topic, msgs)
     |> case do
       :success ->
         do_consume(tail, pt)
