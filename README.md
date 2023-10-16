@@ -207,7 +207,7 @@ More examples can be found in [examples](https://github.com/tt67wq/ex_rocketmq/t
 - [X] Support concurrent message consumer;
 - [X] Support orderly message consume;
 - [X] Support broadcast message consume;
-- [ ] Support trace report;
+- [x] Support trace report;
 - [ ] Support client stats collect;
 - [ ] Support request-reply mode;
 - [ ] Benchmark and optimize performance;
