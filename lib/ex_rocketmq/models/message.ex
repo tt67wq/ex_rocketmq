@@ -74,7 +74,7 @@ defmodule ExRocketmq.Models.Message do
   end
 
   @spec get_property(t(), String.t(), String.t() | nil) :: String.t() | nil
-  def get_property(msg, key, default \\ "")
+  def get_property(msg, key, default \\ nil)
 
   def get_property(%__MODULE__{properties: nil}, _key, _default), do: nil
 

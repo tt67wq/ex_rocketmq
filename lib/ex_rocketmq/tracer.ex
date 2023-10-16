@@ -221,9 +221,12 @@ defmodule ExRocketmq.Tracer do
       |> List.flatten()
       |> Enum.uniq()
 
+    # |> Util.Debug.debug()
+
     body =
       traces
       |> Enum.map_join(fn trace ->
+        # Util.Debug.debug(trace)
         Trace.encode(trace)
       end)
 
@@ -275,7 +278,7 @@ defmodule ExRocketmq.Tracer do
         [msg_id | acc]
 
       %TraceItem{msg_id: msg_id, keys: keys}, acc ->
-        [msg_id, keys | acc]
+        [keys, msg_id | acc]
     end)
     |> Enum.reverse()
   end

@@ -99,6 +99,7 @@ defmodule ExRocketmq.Models.Trace do
       ]
       |> Enum.join(@content_spliter)
     end)
+    |> then(fn x -> x <> @field_spliter end)
   end
 
   def encode(%__MODULE__{
@@ -126,6 +127,7 @@ defmodule ExRocketmq.Models.Trace do
       ]
       |> Enum.join(@content_spliter)
     end)
+    |> then(fn x -> x <> @field_spliter end)
   end
 
   defp group_name!(group_name) do

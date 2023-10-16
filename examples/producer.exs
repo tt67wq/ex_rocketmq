@@ -81,7 +81,7 @@ defmodule DemoProducer do
 
   def run(opts) do
     get_msg()
-    |> Enum.chunk_every(4)
+    |> Enum.chunk_every(2)
     |> Enum.each(fn msgs ->
       to_emit =
         msgs
@@ -92,7 +92,7 @@ defmodule DemoProducer do
       Producer.send_sync(:producer, to_emit)
     end)
 
-    Process.sleep(1000)
+    Process.sleep(5000)
     run(opts)
   end
 end

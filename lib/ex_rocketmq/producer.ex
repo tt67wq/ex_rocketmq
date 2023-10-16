@@ -648,15 +648,25 @@ defmodule ExRocketmq.Producer do
   end
 
   @spec encode_batch([Message.t()]) :: Message.t()
-  defp encode_batch([msg | _] = msgs) when length(msgs) > 1 do
+  defp encode_batch(
+         [
+           %Message{
+             topic: topic,
+             queue_id: queue_id,
+             batch: false
+           }
+           | _
+         ] = msgs
+       )
+       when length(msgs) > 1 do
     body =
       msgs
       |> Enum.map(&Message.encode/1)
       |> IO.iodata_to_binary()
 
     %Message{
-      topic: msg.topic,
-      queue_id: msg.queue_id,
+      topic: topic,
+      queue_id: queue_id,
       batch: true,
       body: body
     }
@@ -665,7 +675,7 @@ defmodule ExRocketmq.Producer do
   defp encode_batch([msg]), do: msg
 
   @spec set_uniqid(Message.t(), pid()) :: Message.t()
-  defp set_uniqid(%Message{batch: false} = msg, uniqid) do
+  defp set_uniqid(%Message{} = msg, uniqid) do
     case Message.get_property(msg, @property_unique_client_msgid_key) do
       nil ->
         Message.with_property(
@@ -679,7 +689,7 @@ defmodule ExRocketmq.Producer do
     end
   end
 
-  defp set_uniqid(msg, _), do: msg
+  # defp set_uniqid(msg, _), do: msg
 
   @spec compress_msg(Message.t(), non_neg_integer(), module(), any()) :: Message.t()
   defp compress_msg(
@@ -783,8 +793,8 @@ defmodule ExRocketmq.Producer do
           client_host: Util.Network.local_ip_addr(),
           body_length: byte_size(body),
           msg_type: msg_type,
-          msg_id: Message.get_property(msg, @property_unique_client_msgid_key, ""),
           offset_msg_id: offset_msg_id,
+          msg_id: Message.get_property(msg, @property_unique_client_msgid_key, ""),
           store_time: System.system_time(:millisecond)
         }
       ]

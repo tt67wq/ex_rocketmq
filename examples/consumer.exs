@@ -30,7 +30,7 @@ defmodule MyProcessor do
   def process(_, topic, msgs) do
     msgs
     |> Enum.each(fn msg ->
-      IO.puts("#{topic}: #{msg.queue_offset} -- #{msg.message.body}")
+      IO.puts("[#{topic}]:#{msg.queue_offset}:#{msg.msg_id} ==> #{msg.message.body}")
     end)
 
     :success
