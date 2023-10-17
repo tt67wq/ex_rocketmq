@@ -1,6 +1,26 @@
 defmodule ExRocketmq.Namesrvs do
   @moduledoc """
-  The namesrvs layer of the rocketmq: how client communicates with the namesrvs
+  The namesrvs layer of the rocketmq: how client communicates with the namesrvs.
+  Most time, you should start nameserver under the supervision tree of your application.
+
+  EG:
+  ```elixir
+
+      Supervisor.start_link(
+        [
+          {Namesrvs,
+           remotes: [
+             [transport: Transport.Tcp.new(host: "test.rocket-mq.net", port: 31_120)]
+           ],
+           opts: [
+             name: :namesrvs
+           ]},
+        ],
+        strategy: :one_for_one
+      )
+  ```
+
+  Your consumer or producer module can communicate with namesrvs by its name
   """
 
   use GenServer
