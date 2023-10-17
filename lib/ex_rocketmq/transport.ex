@@ -20,9 +20,15 @@ defmodule ExRocketmq.Transport do
   defp delegate(%module{} = m, func, args),
     do: apply(module, func, [m | args])
 
+  @doc """
+  start transport module
+  """
   @spec start(t()) :: {:ok, t()} | error_t()
   def start(%module{} = m), do: apply(module, :start, [m])
 
+  @doc """
+  stop transport module
+  """
   @spec stop(t()) :: :ok
   def stop(%module{} = m), do: apply(module, :stop, [m])
 
@@ -33,13 +39,13 @@ defmodule ExRocketmq.Transport do
   def output(transport, msg), do: delegate(transport, :output, [msg])
 
   @doc """
-  recv a pkt from transport layer
+  recv a packet from transport layer
   """
   @spec recv(t()) :: {:ok, binary()} | error_t()
   def recv(transport), do: delegate(transport, :recv, [])
 
   @doc """
-  get the info of the transport
+  get the info of transport
   """
   @spec info(t()) :: {:ok, map()} | error_t()
   def info(transport), do: delegate(transport, :info, [])

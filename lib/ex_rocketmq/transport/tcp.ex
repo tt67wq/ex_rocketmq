@@ -41,6 +41,15 @@ defmodule ExRocketmq.Transport.Tcp do
 
   defstruct [:pid, :host, :port, :timeout, :sockopts, :opts]
 
+  @typedoc """
+  The type of the transport
+  - pid: the pid of the transport, the `start` function will set this field;
+  - host: the host of the target server;
+  - port: the port of the target server;
+  - timeout: connection timeout in milliseconds;
+  - sockopts: the socket options of gen_tcp;
+  - opts: the other options of the transport;
+  """
   @type t :: %__MODULE__{
           pid: pid(),
           host: String.t(),
@@ -53,6 +62,26 @@ defmodule ExRocketmq.Transport.Tcp do
   @type tcp_opts_schema_t :: [unquote(NimbleOptions.option_typespec(@tcp_opts_schema))]
 
   @impl Transport
+  @doc """
+  create new instance of the tcp transport
+
+  *Parameters*
+  - opts: the options of the transport:\n###{NimbleOptions.docs(@tcp_opts_schema)}
+
+
+  ## Examples
+
+      iex> new(host: "some host", port: 1234)
+      %ExRocketmq.Transport.Tcp{
+        pid: nil,
+        host: "some host",
+        port: 1234,
+        timeout: 5000,
+        sockopts: [],
+        opts: []
+      }
+  """
+  @spec new(tcp_opts_schema_t()) :: t()
   def new(opts) do
     opts =
       opts
@@ -61,16 +90,43 @@ defmodule ExRocketmq.Transport.Tcp do
     struct(__MODULE__, opts)
   end
 
+  @doc """
+  output a binary data through the transport socket
+
+  ## Examples
+
+      iex> output(transport, "some data")
+      :ok
+  """
+  @spec output(t(), binary()) :: :ok | {:error, any()}
   @impl Transport
   def output(transport, data) do
     Connection.call(transport.pid, {:send, data})
   end
 
+  @doc """
+  recv a binary packet from the transport socket
+
+  ## Examples
+
+      iex> recv(transport)
+      {:ok, "some data"}
+  """
+  @spec recv(t()) :: {:ok, binary()} | {:error, any()}
   @impl Transport
   def recv(transport) do
     Connection.call(transport.pid, {:recv, 2000})
   end
 
+  @doc """
+  return infomaion of the transport
+
+  ## Examples
+
+      iex> info(transport)
+      {:ok, %{pid: pid, host: host, port: port}}
+  """
+  @spec info(t()) :: {:ok, map()}
   @impl Transport
   def info(%__MODULE__{
         pid: pid,
@@ -85,6 +141,10 @@ defmodule ExRocketmq.Transport.Tcp do
      }}
   end
 
+  @doc """
+  `start` starts Genserver of the transport and set the `pid` field of the transport
+  """
+  @spec start(t()) :: {:ok, t()}
   @impl Transport
   def start(
         %{
@@ -115,6 +175,17 @@ defmodule ExRocketmq.Transport.Tcp do
        sock: nil,
        retry: 0
      }}
+  end
+
+  @impl Connection
+  def terminate(reason, %{sock: sock}) do
+    Logger.warning("tcp terminated with reason: #{inspect(reason)}")
+
+    sock
+    |> is_nil()
+    |> unless do
+      :gen_tcp.close(sock)
+    end
   end
 
   @impl Connection
@@ -217,6 +288,8 @@ defmodule ExRocketmq.Transport.Tcp do
     end
   end
 
+  def handle_call({:send, _data}, _, %{sock: nil} = s), do: {:reply, {:error, :closed}, s}
+
   def handle_call({:send, data}, _, s) do
     case send_with_retry(s, data, 2) do
       :ok ->
@@ -229,22 +302,6 @@ defmodule ExRocketmq.Transport.Tcp do
 
   def handle_call(:close, from, s) do
     {:disconnect, {:close, from}, s}
-  end
-
-  @impl Connection
-  def handle_info(:recving, %{sock: nil} = s) do
-    {:noreply, s}
-  end
-
-  @impl Connection
-  def terminate(reason, %{sock: sock}) do
-    Logger.warning("tcp terminated with reason: #{inspect(reason)}")
-
-    sock
-    |> is_nil()
-    |> unless do
-      :gen_tcp.close(sock)
-    end
   end
 
   @spec send_with_retry(any(), binary(), non_neg_integer()) :: :ok | {:error, any()}

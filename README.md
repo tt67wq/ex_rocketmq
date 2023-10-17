@@ -210,8 +210,7 @@ More examples can be found in [examples](https://github.com/tt67wq/ex_rocketmq/t
 - [x] Support trace report;
 - [ ] Support client stats collect;
 - [ ] Support request-reply mode;
-- [ ] Benchmark and optimize performance;
-- [ ] More document and examples;
+- [ ] Benchmark;
 
 
 
