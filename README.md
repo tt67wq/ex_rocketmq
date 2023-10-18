@@ -91,17 +91,21 @@ defmodule DemoProducer do
     |> Enum.random()
   end
 
-  def run(opts) do
-    Producer.send_sync(:producer, [
-      %Message{topic: @topic, body: get_msg()},
-      %Message{topic: @topic, body: get_msg()},
-      %Message{topic: @topic, body: get_msg()},
-      %Message{topic: @topic, body: get_msg()},
-      %Message{topic: @topic, body: get_msg()},
-      %Message{topic: @topic, body: get_msg()}
-    ])
 
-    Process.sleep(1000)
+  def run(opts) do
+    get_msg()
+    |> Enum.chunk_every(2)
+    |> Enum.each(fn msgs ->
+      to_emit =
+        msgs
+        |> Enum.map(fn msg ->
+          %Message{topic: @topic, body: msg}
+        end)
+
+      Producer.send_sync(:producer, to_emit)
+    end)
+
+    Process.sleep(5000)
     run(opts)
   end
 end
@@ -200,18 +204,4 @@ Process.sleep(:infinity)
 ```
 
 More examples can be found in [examples](https://github.com/tt67wq/ex_rocketmq/tree/master/examples)
-
-## Roadmap
-- [X] Support normal message producer;
-- [X] Support transactional message producer;
-- [X] Support concurrent message consumer;
-- [X] Support orderly message consume;
-- [X] Support broadcast message consume;
-- [x] Support trace report;
-- [ ] Support client stats collect;
-- [ ] Support request-reply mode;
-- [ ] Benchmark;
-
-
-
 

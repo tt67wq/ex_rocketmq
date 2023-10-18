@@ -1,6 +1,20 @@
 defmodule ExRocketmq.Broker do
   @moduledoc """
   RocketMQ Broker Client
+
+  The broker is the core component of RocketMQ. It handles responsibilities such as message storage,
+  forwarding, and fulfilling consumer queries.
+
+  Each broker cluster has a name server that handles registration and discovery.
+  The broker registers topic and queue metadata with the name server,
+  and producers and consumers locate brokers through the name server to send and receive messages.
+
+  Within each broker there can be multiple queues, which store messages.
+  For a given topic, it can be deployed with multiple replicated queues across multiple brokers to ensure high availability.
+
+  Additionally, the broker offers message filtering and consumption balancing.
+  Message filtering permits only consuming a subset of messages,
+  and consumption balancing can distribute messages among multiple consumer groups according to consumption speed.
   """
 
   defmodule State do
@@ -106,6 +120,26 @@ defmodule ExRocketmq.Broker do
 
   @type namesrvs_opts_schema_t :: [unquote(NimbleOptions.option_typespec(@broker_opts_schema))]
 
+  @doc """
+  In most cases, broker processes are started as subprocesses of producers or consumers.
+  For ease of management, they are generally started using dynamic_supervision,
+  while also registering the addr as a key in the registry,
+  making it possible to locate a specific broker process according to its addr.
+
+  If producer or consumer start broker process using `get_or_new_broker`,
+  it must handle the `:notify` message sent by the broker process, like this:
+
+  ```Elixir
+  def handle_info({:notify, {pkt, broker_pid}} do
+    # handle pkt
+  end
+  ```
+
+  ## Examples
+
+      iex> ExRocketmq.Broker.get_or_new_broker("broker0", "localhost:31001", RegistryName, DynamicSupervisorPid)
+      #PID<0.123.0>
+  """
   @spec get_or_new_broker(Typespecs.broker_name(), String.t(), atom(), pid()) :: pid()
   def get_or_new_broker(broker_name, addr, registry, dynamic_supervisor) do
     Registry.lookup(registry, addr)
@@ -135,6 +169,17 @@ defmodule ExRocketmq.Broker do
     end
   end
 
+  @doc """
+  start a broker process, we use `get_or_new_broker` in most cases, `start_link` is used for special cases if needed.
+
+  ## Parameters
+  #{NimbleOptions.docs(@broker_opts_schema)}
+
+
+  ## Examples
+
+      {:ok, return_value} = function_name()
+  """
   @spec start_link(namesrvs_opts_schema_t()) :: Typespecs.on_start()
   def start_link(opts) do
     {opts, init} =
@@ -148,12 +193,62 @@ defmodule ExRocketmq.Broker do
   @spec stop(pid()) :: :ok
   def stop(broker), do: GenServer.stop(broker)
 
-  @spec controlling_process(pid(), pid()) :: :ok
-  def controlling_process(broker, pid), do: GenServer.cast(broker, {:controlling_process, pid})
+  defp controlling_process(broker, pid), do: GenServer.cast(broker, {:controlling_process, pid})
 
   @spec broker_name(pid()) :: String.t()
   def broker_name(broker), do: GenServer.call(broker, :broker_name)
 
+  @doc """
+  The heartbeat mechanism in RocketMQ is used to maintain the connection status between message producers and consumers and the message middleware.
+  It detects whether the connection is normal by periodically sending heartbeat packets and promptly identifies and handles connection exceptions.
+
+  Specifically, the heartbeat mechanism in RocketMQ has the following key points:
+
+  - Sending heartbeat packets: Message producers and consumers regularly send heartbeat packets to the message middleware.
+    These packets contain necessary information such as the ID and version number of the producer/consumer.
+    This information helps the middleware identify the client sending the heartbeat.
+
+  - Receiving heartbeat packets: The message middleware periodically receives heartbeat packets from producers and consumers.
+    By receiving these packets, the middleware can determine if the client is online and check the connection status.
+
+  - Heartbeat timeout detection: The message middleware sets a heartbeat timeout period to check the reception of heartbeat packets.
+    If no heartbeat packet is received within the specified time, the middleware considers the client's connection to be abnormal and takes appropriate action.
+
+
+  for producer, heartbeat packet carries producer data set, for consumer, heartbeat packet carries consumer data set.
+
+  ## Examples
+
+      iex> ExRocketmq.Broker.heartbeat(broker, %ExRocketmq.Models.Heartbeat{
+      ...>   client_id: "producer_client_id",
+      ...>   producer_data_set: [%ExRocketmq.Models.ProducerData{group: "group"}],
+      ...> })
+
+      iex> ExRocketmq.Broker.heartbeat(broker, %ExRocketmq.Models.Heartbeat{
+      ...>   client_id: "consumer_client_id",
+      ...>   consumer_data_set: [
+      ...>     %ExRocketmq.Models.ConsumerData{
+      ...>           group: "group"
+      ...>           consume_type: "CONSUME_PASSIVELY",
+      ...>           message_model: "Clustering",
+      ...>           consume_from_where: "CONSUME_FROM_LAST_OFFSET",
+      ...>           subscription_data_set: [
+      ...>             %ExRocketmq.Models.Subscription{
+      ...>               class_filter_mode: false,
+      ...>               topic: "topic",
+      ...>               sub_string: "*",
+      ...>               tags_set: [],
+      ...>               code_set: [],
+      ...>               sub_version: 0,
+      ...>               expression_type: "TAG"
+      ...>             }
+      ...>           ],
+      ...>           unit_mode: false
+      ...>     }
+      ...>   ],
+      ...> })
+
+  """
   @spec heartbeat(pid(), Heartbeat.t()) :: :ok | Typespecs.error_t()
   def heartbeat(broker, heartbeat) do
     {:ok, body} = Heartbeat.encode(heartbeat)
@@ -425,7 +520,12 @@ defmodule ExRocketmq.Broker do
   def handle_call(
         {:rpc, code, body, ext_fields, rpc_timeout},
         from,
-        %{remote: remote, opaque: opaque, task_supervisor: task_supervisor, task_ref: task_ref} =
+        %{
+          remote: remote,
+          opaque: opaque,
+          task_supervisor: task_supervisor,
+          task_ref: task_ref
+        } =
           state
       ) do
     pkt =

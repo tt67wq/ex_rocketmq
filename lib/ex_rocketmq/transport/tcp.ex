@@ -65,9 +65,8 @@ defmodule ExRocketmq.Transport.Tcp do
   @doc """
   create new instance of the tcp transport
 
-  *Parameters*
-  - opts: the options of the transport:\n###{NimbleOptions.docs(@tcp_opts_schema)}
-
+  ## Options
+  #{NimbleOptions.docs(@tcp_opts_schema)}
 
   ## Examples
 

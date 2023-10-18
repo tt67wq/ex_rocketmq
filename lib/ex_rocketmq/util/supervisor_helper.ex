@@ -1,6 +1,9 @@
 defmodule ExRocketmq.Util.SupervisorHelper do
   @moduledoc false
 
+  @doc """
+  return all pids under one supervisor
+  """
   @spec all_pids_under_supervisor(pid()) :: list(pid())
   def all_pids_under_supervisor(broker_dynamic_supervisor) do
     broker_dynamic_supervisor

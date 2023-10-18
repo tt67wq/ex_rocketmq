@@ -1,6 +1,16 @@
 defmodule ExRocketmq.Util.UniqId do
   @moduledoc """
-  generate uniq id for rocketmq msg
+  generate uniq id for rocketmq msg or request
+  uinque-id consists of 2 parts:
+  - prefix:
+  - gap timestamp + counter
+
+  prefix consists of 2 parts:
+  - ip address
+  - pid
+
+  gap timestaamp is the gap between current time and start timestamp this month in milliseconds
+  counter is the auto increment number in process
   """
 
   defmodule State do
@@ -11,6 +21,14 @@ defmodule ExRocketmq.Util.UniqId do
 
   use Agent
 
+  @doc """
+  generate a unique id
+
+  ## Examples
+
+      iex> ExRocketmq.Util.UniqId.get_uniq_id(pid)
+      "0A93667D3B0A0000000063952A000001"
+  """
   @spec get_uniq_id(pid()) :: binary()
   def get_uniq_id(name) do
     :ok =
@@ -38,6 +56,9 @@ defmodule ExRocketmq.Util.UniqId do
     )
   end
 
+  @doc """
+  start a uniqid generater agent
+  """
   @spec start_link(Keyword.t()) :: Agent.on_start()
   def start_link(opts \\ []) do
     with pid <- get_pid(),
@@ -58,6 +79,7 @@ defmodule ExRocketmq.Util.UniqId do
            )
   end
 
+  @spec stop(pid()) :: :ok
   def stop(pid), do: Agent.stop(pid)
 
   @spec get_pid() :: non_neg_integer()

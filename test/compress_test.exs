@@ -1,4 +1,5 @@
 defmodule CompressTest do
+  @moduledoc false
   use ExUnit.Case
 
   alias ExRocketmq.{Compressor, Compress.Zlib, Util.Debug}

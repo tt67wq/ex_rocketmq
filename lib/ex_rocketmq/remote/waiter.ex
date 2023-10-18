@@ -1,6 +1,8 @@
 defmodule ExRocketmq.Remote.Waiter do
   @moduledoc """
   The future-wait store of the remote, opaque => request pid
+  This module is a wrapper of ets and genserver, ets is responsible for storing the request,
+  and GenServer is responsible for cleaning up the expired request
   """
 
   alias ExRocketmq.{Typespecs}
@@ -38,28 +40,53 @@ defmodule ExRocketmq.Remote.Waiter do
 
   @type opts_schema_t :: [unquote(NimbleOptions.option_typespec(@opts_schema))]
 
+  @doc """
+  pop the value of the key from the waiter
+
+  ## Examples
+
+      iex> ExRocketmq.Remote.Waiter.pop(waiter, 1)
+      nil
+  """
   @spec pop(t(), Typespecs.opaque()) :: value()
   def pop(waiter, key) do
-    value =
-      case :ets.lookup(waiter.name, key) do
-        [{^key, value, :infinity}] ->
-          value
+    case :ets.lookup(waiter.name, key) do
+      [{^key, value, :infinity}] ->
+        {:ok, value}
 
-        [{^key, value, timeout}] when is_integer(timeout) ->
-          if timeout < :os.system_time(:millisecond) do
-            nil
-          else
-            value
-          end
+      [{^key, value, timeout}] when is_integer(timeout) ->
+        if timeout < :os.system_time(:millisecond) do
+          {:ok, nil}
+        else
+          {:ok, value}
+        end
 
-        _ ->
-          nil
-      end
+      _ ->
+        :empty
+    end
+    |> case do
+      {:ok, val} ->
+        :ets.delete(waiter.name, key)
+        val
 
-    :ets.delete(waiter.name, key)
-    value
+      :empty ->
+        nil
+    end
   end
 
+  @doc """
+  put key-value pair to the waiter
+
+  ## Params
+  - `waiter` - the waiter instance
+  - `key` - the key of the value, must be an integer
+  - `value` - the value of the key
+  - `ttl` - the time to live(milliseconds) of the key-value pair
+
+  ## Examples
+
+      iex> ExRocketmq.Remote.Waiter.put(waiter, 1, return_value, ttl: 5000)
+  """
   @spec put(t(), key(), value(), ttl: non_neg_integer() | :infinity) :: any()
   def put(waiter, key, value, ttl: :infinity),
     do: :ets.insert(waiter.name, {key, value, :infinity})
@@ -69,6 +96,21 @@ defmodule ExRocketmq.Remote.Waiter do
 
   def put(waiter, key, value, []), do: put(waiter, key, value, ttl: :infinity)
 
+  @doc """
+  start the waiter
+
+  ## Options
+  #{NimbleOptions.docs(@opts_schema)}
+
+  ## Examples
+
+      iex> ExRocketmq.Remote.Waiter.start(name: :waiter_name)
+      %ExRocketmq.Remote.Waiter{
+        name: :waiter_name,
+        pid: #PID<0.262.0>,
+        interval: 5000
+      }
+  """
   @spec start(opts_schema_t()) :: t()
   def start(opts) do
     {opts, init} =
@@ -78,6 +120,12 @@ defmodule ExRocketmq.Remote.Waiter do
 
     {:ok, pid} = GenServer.start_link(__MODULE__, init, opts)
     %__MODULE__{pid: pid, name: init[:name], interval: init[:interval]}
+  end
+
+  @impl true
+  def terminate(_reason, %{name: name}) do
+    :ets.delete_all_objects(name)
+    :ets.delete(name)
   end
 
   @spec stop(t()) :: :ok
@@ -119,11 +167,5 @@ defmodule ExRocketmq.Remote.Waiter do
 
     Process.send_after(self(), :cleanup, interval)
     {:noreply, state}
-  end
-
-  @impl true
-  def terminate(_reason, %{name: name}) do
-    :ets.delete_all_objects(name)
-    :ets.delete(name)
   end
 end

@@ -1,6 +1,10 @@
 defmodule ExRocketmq.Remote do
   @moduledoc """
-  The remote layer of the rocketmq: how client communicates with the nameserver
+  The remote layer of the rocketmq: how client communicates with the nameserver or broker.
+  Remote support 3 functions:
+  - rpc: request-reply
+  - one_way: send msg and don't wait for the response
+  - pop_notify: pop the notify msg from the queue
   """
 
   alias ExRocketmq.{
@@ -93,9 +97,13 @@ defmodule ExRocketmq.Remote do
     GenServer.start_link(__MODULE__, args, opts)
   end
 
+  @doc """
+  stop remote server
+  """
   @spec stop(pid()) :: :ok
   def stop(remote), do: GenServer.stop(remote)
 
+  # ----------- server callbacks -----------
   def init(opts) do
     {:ok, notify} = Queue.start_link()
 
@@ -103,12 +111,29 @@ defmodule ExRocketmq.Remote do
      %{
        transport: opts[:transport],
        serializer: opts[:serializer],
+       # waiter is request-reply key-value store
        waiter: Waiter.start(name: :"#{Random.generate_id("W")}"),
        notify: notify
      }, {:continue, :connect}}
   end
 
-  # 启动后立即连接传输层，并且启动接收消息的定时器
+  def terminate(reason, %{transport: transport, waiter: waiter, notify: notify}) do
+    Logger.info("remote terminated with reason: #{inspect(reason)}")
+
+    # stop the transport connection
+    transport
+    |> is_nil()
+    |> unless do
+      Transport.stop(transport)
+    end
+
+    # stop the waiter
+    Waiter.stop(waiter)
+
+    # stop the notify queue
+    Queue.stop(notify)
+  end
+
   def handle_continue(:connect, %{transport: transport} = state) do
     Transport.start(transport)
     |> case do
@@ -124,12 +149,24 @@ defmodule ExRocketmq.Remote do
   def handle_call(
         {:rpc, msg},
         from,
-        %{transport: transport, serializer: serializer, waiter: waiter} = state
+        %{
+          transport: transport,
+          serializer: serializer,
+          waiter: waiter
+        } = state
       ) do
     {:ok, data} = Serializer.encode(serializer, msg)
+
     Transport.output(transport, data)
-    Waiter.put(waiter, Packet.packet(msg, :opaque), from, ttl: 60_000)
-    {:noreply, state}
+    |> case do
+      :ok ->
+        Waiter.put(waiter, Packet.packet(msg, :opaque), from, ttl: 60_000)
+        {:noreply, state}
+
+      {:error, reason} = err ->
+        Logger.error("output data error: #{inspect(reason)}")
+        {:reply, err, state}
+    end
   end
 
   def handle_call(:transport_info, _, %{transport: transport} = state),
@@ -140,8 +177,16 @@ defmodule ExRocketmq.Remote do
 
   def handle_cast({:one_way, msg}, %{transport: transport, serializer: serializer} = state) do
     {:ok, data} = Serializer.encode(serializer, msg)
+
     Transport.output(transport, data)
-    {:noreply, state}
+    |> case do
+      :ok ->
+        {:noreply, state}
+
+      {:error, reason} ->
+        Logger.error("output data error: #{inspect(reason)}")
+        {:stop, reason, state}
+    end
   end
 
   def handle_info(
@@ -156,8 +201,10 @@ defmodule ExRocketmq.Remote do
     with {:ok, data} <- Transport.recv(transport),
          {:ok, pkt} <- Serializer.decode(serializer, data) do
       if Packet.response_type?(pkt) do
+        # find caller pid by opaque and sendback response
         process_response(pkt, waiter)
       else
+        # put into queue
         process_notify(pkt, queue)
       end
 
@@ -190,21 +237,4 @@ defmodule ExRocketmq.Remote do
   end
 
   defp process_notify(pkt, queue), do: Queue.push(queue, pkt)
-
-  def terminate(reason, %{transport: transport, waiter: waiter, notify: notify}) do
-    Logger.info("remote terminated with reason: #{inspect(reason)}")
-
-    # stop the transport connection
-    transport
-    |> is_nil()
-    |> unless do
-      Transport.stop(transport)
-    end
-
-    # stop the waiter
-    Waiter.stop(waiter)
-
-    # stop the notify queue
-    Queue.stop(notify)
-  end
 end

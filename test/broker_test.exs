@@ -119,7 +119,6 @@ defmodule BrokerTest do
              )
   end
 
-  @tag mustexec: true
   test "pull_message", %{broker: broker, topic: topic, group: group} do
     assert {:ok, _} =
              Broker.pull_message(
