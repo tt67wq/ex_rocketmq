@@ -174,11 +174,6 @@ defmodule ExRocketmq.Broker do
 
   ## Parameters
   #{NimbleOptions.docs(@broker_opts_schema)}
-
-
-  ## Examples
-
-      {:ok, return_value} = function_name()
   """
   @spec start_link(namesrvs_opts_schema_t()) :: Typespecs.on_start()
   def start_link(opts) do
@@ -268,14 +263,21 @@ defmodule ExRocketmq.Broker do
   defp send_msg_code(%{batch: true}), do: @req_send_batch_message
   defp send_msg_code(_), do: @req_send_message
 
+  @doc """
+  send message to broker and wait for response.
+  If you want to send message asynchronously, you can wrap this method in a `Task`,
+  so we don't provide a `async_send_message` method.
+  """
   @spec sync_send_message(pid(), SendMsg.Request.t(), binary()) ::
           {:ok, SendMsg.Response.t()} | Typespecs.error_t()
   def sync_send_message(broker, req, body) do
     ext_fields = ExtFields.to_map(req)
     code = send_msg_code(req)
 
+    # retry 3 times
     with {:ok, pkt} <- send_with_retry(broker, code, body, ext_fields, 3),
          {:ok, resp} <- SendMsg.Response.from_pkt(pkt) do
+      # part of queue information is not included in the response, so we need to add it manually
       q = %{resp.queue | topic: req.topic, broker_name: GenServer.call(broker, :broker_name)}
       {:ok, %{resp | queue: q}}
     end
@@ -316,6 +318,11 @@ defmodule ExRocketmq.Broker do
     end
   end
 
+  @doc """
+  send message to broker and don't wait for response, the request is totally the same as `sync_send_message`,
+  broker actully will send response to client, but client ignore it.
+  It's kind of waste of network resource, maybe we can improve it in the future.
+  """
   @spec one_way_send_message(pid(), SendMsg.Request.t(), binary()) ::
           :ok
   def one_way_send_message(broker, req, body) do
@@ -323,6 +330,11 @@ defmodule ExRocketmq.Broker do
     GenServer.cast(broker, {:one_way, send_msg_code(req), body, ext_fields})
   end
 
+  @doc """
+  pull message from broker.
+  This request can also update queue's offset via `sys_flag` in `PullMsg.Request.t()`,
+  so we can use it to update queue's offset while consuming message.
+  """
   @spec pull_message(pid(), PullMsg.Request.t()) ::
           {:ok, PullMsg.Response.t()} | Typespecs.error_t()
   def pull_message(broker, req) do
@@ -346,6 +358,10 @@ defmodule ExRocketmq.Broker do
     end
   end
 
+  @doc """
+  query offset of queue in remote broker.
+  If the queue has never been consumed, a error code 22 will return
+  """
   @spec query_consumer_offset(pid(), QueryConsumerOffset.t()) ::
           {:ok, non_neg_integer()} | Typespecs.error_t()
   def query_consumer_offset(broker, req) do
@@ -363,6 +379,10 @@ defmodule ExRocketmq.Broker do
     end
   end
 
+  @doc """
+  Set offset of queue in remote broker.
+  In most cases, we set remote offset using `pull_message` request.
+  """
   @spec update_consumer_offset(pid(), UpdateConsumerOffset.t()) ::
           :ok | Typespecs.error_t()
   def update_consumer_offset(broker, req) do
@@ -370,6 +390,10 @@ defmodule ExRocketmq.Broker do
     GenServer.cast(broker, {:one_way, @req_update_consumer_offset, <<>>, ext_fields})
   end
 
+  @doc """
+  Search offset of queue by timestamp.
+  This method is used when consumer want to consume message from a specific timestamp.
+  """
   @spec search_offset_by_timestamp(pid(), SearchOffset.t()) ::
           {:ok, non_neg_integer()} | Typespecs.error_t()
   def search_offset_by_timestamp(broker, req) do
@@ -392,6 +416,9 @@ defmodule ExRocketmq.Broker do
     end
   end
 
+  @doc """
+  Get last offset of queue in remote broker.
+  """
   @spec get_max_offset(pid(), GetMaxOffset.t()) ::
           {:ok, non_neg_integer()} | Typespecs.error_t()
   def get_max_offset(broker, req) do
@@ -414,6 +441,10 @@ defmodule ExRocketmq.Broker do
     end
   end
 
+  @doc """
+  When one consumer do consume jobs and failed many times, it will send a `consumer_send_msg_back` request to broker,
+  then broker will try to send the message to another consumer.
+  """
   @spec consumer_send_msg_back(pid(), ConsumerSendMsgBack.t()) ::
           :ok | Typespecs.error_t()
   def consumer_send_msg_back(broker, req) do
@@ -433,6 +464,10 @@ defmodule ExRocketmq.Broker do
     end
   end
 
+  @doc """
+  Get consumer list by group name.
+  This method is used in rebalance process.
+  """
   @spec get_consumer_list_by_group(pid(), String.t()) ::
           {:ok, list(String.t())} | Typespecs.error_t()
   def get_consumer_list_by_group(broker, group) do
@@ -453,12 +488,25 @@ defmodule ExRocketmq.Broker do
     end
   end
 
+  @doc """
+  In the process of sending transactional messages, after the producer completes the local task check,
+  it will send an end_transaction request to the broker to mark the completion of the transaction for that message.
+
+  The end_transaction request is a one-way request that may fail.
+  If the request fails, the broker will periodically send a check request to the producer
+  to trigger the client to resend the end_transaction request.
+  """
   @spec end_transaction(pid(), EndTransaction.t()) :: :ok | Typespecs.error_t()
   def end_transaction(broker, req) do
     ext_fields = ExtFields.to_map(req)
     GenServer.cast(broker, {:one_way, @req_end_transaction, <<>>, ext_fields})
   end
 
+  @doc """
+  In the scenario of sequential message consumption,
+  the consumer needs to exclusively acquire a certain message queue (mq).
+  By invoking this method, the consumer can perform a remote broker lock operation on the mq.
+  """
   @spec lock_batch_mq(pid(), Lock.Req.t()) :: {:ok, Lock.Resp.t()} | Typespecs.error_t()
   def lock_batch_mq(broker, req) do
     body = Lock.Req.encode(req)
@@ -475,6 +523,11 @@ defmodule ExRocketmq.Broker do
     end
   end
 
+  @doc """
+  The reverse operation of lock_batch_mq is typically invoked
+  after rebalancing when the message queue (mq) is reassigned from one consumer to another.
+  Prior to that, it is necessary to call this method to unlock the mq.
+  """
   @spec unlock_batch_mq(pid(), Lock.Req.t()) :: :ok | Typespecs.error_t()
   def unlock_batch_mq(broker, req) do
     body = Lock.Req.encode(req)
@@ -512,6 +565,16 @@ defmodule ExRocketmq.Broker do
      }, {:continue, :on_start}}
   end
 
+  def terminate(reason, %State{remote: remote, task_supervisor: task_supervisor}) do
+    Logger.warning("broker terminated with reason: #{inspect(reason)}")
+    Remote.stop(remote)
+
+    Task.Supervisor.children(task_supervisor)
+    |> Enum.each(fn pid ->
+      Task.Supervisor.terminate_child(task_supervisor, pid)
+    end)
+  end
+
   def handle_continue(:on_start, state) do
     Process.send_after(self(), :pop_notify, 1000)
     {:noreply, state}
@@ -536,6 +599,9 @@ defmodule ExRocketmq.Broker do
         body: body
       )
 
+    # There is a possibility that the rpc may take a long time, and we do not want it to block the GenServer.
+    # Therefore, we utilize Task.Supervisor.async_nolink to initiate an asynchronous task for invoking the rpc,
+    # and handle the callback of rpc task results within the GenServer.
     task =
       Task.Supervisor.async_nolink(task_supervisor, fn ->
         Remote.rpc(remote, pkt, rpc_timeout)
@@ -585,6 +651,9 @@ defmodule ExRocketmq.Broker do
     {:noreply, state}
   end
 
+  # The pop_notify function is called periodically to pull messages sent by the broker from the remote.
+  # If the broker process has already bound a certain consumer or producer,
+  # we will send the messages to them in the format '{:notify, {msg, self()}}'.
   def handle_info(:pop_notify, %{controlling_process: nil} = state) do
     Logger.warning("controlling process is nil, broker will not notify")
     Process.send_after(self(), :pop_notify, 5000)
@@ -638,10 +707,5 @@ defmodule ExRocketmq.Broker do
         GenServer.reply(from, {:error, reason})
         {:noreply, %{state | task_ref: task_ref}}
     end
-  end
-
-  def terminate(reason, %{remote: remote}) do
-    Logger.warning("broker terminated with reason: #{inspect(reason)}")
-    Remote.stop(remote)
   end
 end

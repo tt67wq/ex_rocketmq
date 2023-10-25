@@ -140,6 +140,20 @@ defmodule BrokerTest do
              |> Debug.debug()
   end
 
+  @tag :must_exec
+  test "query_consumer_offset", %{broker: broker, topic: topic, group: group} do
+    assert {:ok, _} =
+             Broker.query_consumer_offset(
+               broker,
+               %Models.QueryConsumerOffset{
+                 consumer_group: group,
+                 topic: "WANQIANG_TEST",
+                 queue_id: 1
+               }
+             )
+             |> Debug.debug()
+  end
+
   test "search_offset_by_timestamp", %{broker: broker, topic: topic} do
     assert {:ok, _} =
              Broker.search_offset_by_timestamp(

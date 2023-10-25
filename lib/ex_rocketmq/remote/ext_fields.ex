@@ -11,6 +11,9 @@ defmodule ExRocketmq.Remote.ExtFields do
   defp delegate(%module{} = m, func, args),
     do: apply(module, func, [m | args])
 
+  @doc """
+  convert a struct to a jsonable string->string dict
+  """
   @spec to_map(t()) :: Typespecs.str_dict()
   def to_map(m), do: delegate(m, :to_map, [])
 end
