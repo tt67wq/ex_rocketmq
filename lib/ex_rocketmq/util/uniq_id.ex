@@ -1,16 +1,21 @@
 defmodule ExRocketmq.Util.UniqId do
   @moduledoc """
-  generate uniq id for rocketmq msg or request
-  uinque-id consists of 2 parts:
-  - prefix:
-  - gap timestamp + counter
+  Utility module for generating unique IDs for RocketMQ messages or requests.
 
-  prefix consists of 2 parts:
-  - ip address
-  - pid
+  A unique ID consists of two parts:
+  - Prefix: IP address and process ID
+  - Gap timestamp + counter
 
-  gap timestaamp is the gap between current time and start timestamp this month in milliseconds
-  counter is the auto increment number in process
+  The prefix is composed of the IP address and process ID of the current process.
+  The gap timestamp is the difference between the current time and the start of the current month, in milliseconds.
+  The counter is an auto-incrementing number for each process.
+
+  This module uses an Agent to keep track of the state of the counter and timestamp.
+
+  ## Examples
+
+      iex> ExRocketmq.Util.UniqId.get_uniq_id(pid)
+      "0A93667D3B0A0000000063952A000001"
   """
 
   defmodule State do

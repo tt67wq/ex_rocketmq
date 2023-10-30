@@ -10,4 +10,5 @@ defmodule ExRocketmq.Protocol.Properties do
   const :property_producer_group, "PGROUP"
   const :property_msg_type, "MSG_TYPE"
   const :property_transaction_id, "__transactionId__"
+  const :property_sharding_key, "SHARDING_KEY"
 end

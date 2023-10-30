@@ -1,6 +1,81 @@
 defmodule ExRocketmq.Producer do
   @moduledoc """
-  Rocketmq Producer
+  This module provides a GenServer implementation of a RocketMQ producer.
+
+  ## Example
+
+  - First, write a producer task:
+  ```Elixir
+  defmodule DemoProducer do
+
+    use Task
+
+    alias ExRocketmq.Producer
+    alias ExRocketmq.Models.Message
+
+    @topic "POETRY"
+    @msgs "风劲角弓鸣，将军猎渭城。
+    草枯鹰眼疾，雪尽马蹄轻。
+    忽过新丰市，还归细柳营。
+    回看射雕处，千里暮云平。"
+
+    def start_link(opts) do
+      Task.start_link(__MODULE__, :run, [opts])
+    end
+
+    defp get_msg() do
+      @msgs
+      |> String.split("\n")
+    end
+
+    def run(opts) do
+      get_msg()
+      |> Enum.each(fn msgs ->
+        to_emit =
+          msgs
+          |> Enum.map(fn msg ->
+            %Message{topic: @topic, body: msg}
+          end)
+
+        Producer.send_sync(:producer, to_emit)
+      end)
+
+      Process.sleep(5000)
+      run(opts)
+    end
+  end
+  ```
+
+  - Second, add namesrvs and producer and your msg produce task to supervisor tree:
+  ```Elixir
+  children = [
+    {Namesrvs,
+     remotes: [
+       [transport: Transport.Tcp.new(host: "test.rocket-mq.net", port: 31_120)]
+     ],
+     opts: [
+       name: :namesrvs
+     ]},
+    {
+      Producer,
+      group_name: "GID_POETRY",
+      namesrvs: :namesrvs,
+      trace_enable: true,
+      opts: [
+        name: :producer
+      ]
+    },
+    {
+      DemoProducer,
+      []
+    }
+  ]
+
+  Supervisor.start_link(children, strategy: :one_for_one)
+  ```
+
+  This module support both normal producer and transactional producer, if you want to use transactional producer,
+  you must implement `ExRocketmq.Producer.Transaction` behaviour, see this [example](https://github.com/tt67wq/ex_rocketmq/blob/master/examples/trans_producer.exs) for more details.
   """
   defmodule State do
     @moduledoc """
@@ -185,6 +260,23 @@ defmodule ExRocketmq.Producer do
           Typespecs.topic() => {list(BrokerData.t()), list(MessageQueue.t())}
         }
 
+  @doc """
+  start producer process
+
+  ## Options
+  #{NimbleOptions.docs(@producer_opts_schema)}
+
+  ## Examples
+
+      iex> ExRocketmq.Producer.start_link(
+        group_name: "GID_POETRY",
+        namesrvs: :namesrvs,
+        trace_enable: true,
+        opts: [
+          name: :producer
+        ]
+      )
+  """
   @spec start_link(producer_opts_schema_t()) :: Typespecs.on_start()
   def start_link(opts) do
     {opts, init} =
@@ -629,6 +721,8 @@ defmodule ExRocketmq.Producer do
     end
   end
 
+  # Dynamically maintaining the mapping between topics and brokers,
+  # with the mappings between all topics and brokers being refreshed periodically in the future.
   @spec update_publish_info(publish_map(), Typespecs.topic(), pid() | atom()) :: publish_map()
   defp update_publish_info(pmap, topic, namesrvs) do
     pmap
@@ -640,6 +734,7 @@ defmodule ExRocketmq.Producer do
           Map.put(pmap, topic, {topic_route_info, mqs})
 
         {:error, _} ->
+          Logger.warning("update publish info for topic #{topic} error")
           pmap
       end
     else
