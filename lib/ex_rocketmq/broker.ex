@@ -62,7 +62,8 @@ defmodule ExRocketmq.Broker do
     GetMaxOffset,
     EndTransaction,
     ConsumerSendMsgBack,
-    Lock
+    Lock,
+    ConsumeMessageDirectlyResult
   }
 
   require Packet
@@ -544,6 +545,11 @@ defmodule ExRocketmq.Broker do
         Logger.error("unlock_batch_mq error: #{inspect(reason)}")
         error
     end
+  end
+
+  @spec consume_directly_reply(pid(), ConsumeMessageDirectlyResult.t()) :: :ok
+  def consume_directly_reply(broker, req) do
+    GenServer.cast(broker, {:one_way, @resp_success, <<>>, ExtFields.to_map(req)})
   end
 
   # ------- server ------

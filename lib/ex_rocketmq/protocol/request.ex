@@ -34,6 +34,8 @@ defmodule ExRocketmq.Protocol.Request do
   const :req_unlock_batch_mq, 42
   const :req_get_routeinfo_by_topic, 105
   const :req_get_broker_cluster_info, 106
+  # 直接消费消息
+  const :req_consume_message_directly, 309
   const :req_send_batch_message, 320
   const :req_send_reply_message, 324
 end

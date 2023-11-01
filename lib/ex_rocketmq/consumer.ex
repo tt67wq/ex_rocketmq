@@ -66,18 +66,20 @@ defmodule ExRocketmq.Consumer do
 
   use GenServer
 
+  alias ExRocketmq.Models.MessageExt
+
   alias ExRocketmq.{
     Util,
     Typespecs,
     Namesrvs,
     Broker,
     Consumer.BalanceStrategy,
-    Protocol.Request,
-    Protocol.PullStatus,
     Remote.Packet,
     InnerConsumer,
     Tracer
   }
+
+  alias ExRocketmq.Protocol.{ConsumeResult, Request, PullStatus}
 
   alias ExRocketmq.Models.{
     Subscription,
@@ -87,13 +89,16 @@ defmodule ExRocketmq.Consumer do
     ConsumerData,
     BrokerData,
     MessageQueue,
-    ConsumeState
+    ConsumeState,
+    ConsumeMessageDirectly,
+    ConsumeMessageDirectlyResult
   }
 
   require Logger
   require Request
   require Packet
   require PullStatus
+  require ConsumeResult
 
   @consumer_opts_schema [
     consumer_group: [
@@ -179,7 +184,14 @@ defmodule ExRocketmq.Consumer do
     ]
   ]
 
+  # request const
   @req_notify_consumer_ids_changed Request.req_notify_consumer_ids_changed()
+  @req_consume_message_directly Request.req_consume_message_directly()
+
+  # consume result
+  @consume_success ConsumeResult.success()
+  @consume_retry_later ConsumeResult.retry_later()
+  @consume_suspend ConsumeResult.suspend_current_queue_a_moment()
 
   @type consumer_opts_schema_t :: [unquote(NimbleOptions.option_typespec(@consumer_opts_schema))]
 
@@ -444,7 +456,7 @@ defmodule ExRocketmq.Consumer do
   end
 
   def handle_info(
-        {:notify, {pkt, _broker_pid}},
+        {:notify, {pkt, broker_pid}},
         %State{} = state
       ) do
     Logger.warning("consumer receive notify: #{inspect(pkt)}")
@@ -453,8 +465,12 @@ defmodule ExRocketmq.Consumer do
       @req_notify_consumer_ids_changed ->
         {:noreply, do_balance(state)}
 
+      @req_consume_message_directly ->
+        consume_message_directly(pkt, broker_pid, state)
+        {:noreply, state}
+
       other_code ->
-        Logger.warning("unknown notify code: #{other_code}")
+        Logger.warning("unimplemented notify code: #{other_code}")
         {:noreply, state}
     end
   end
@@ -838,5 +854,54 @@ defmodule ExRocketmq.Consumer do
       )
     end)
     |> Stream.run()
+  end
+
+  defp consume_message_directly(pkt, broker_pid, %State{
+         client_id: client_id,
+         tracer: tracer,
+         processor: processor
+       }) do
+    req =
+      pkt
+      |> Packet.packet(:ext_fields)
+      |> ConsumeMessageDirectly.decode()
+
+    Logger.info("consume message directly, req: #{inspect(req)}")
+
+    if req.client_id != client_id do
+      Logger.warning("client id not match, ignore")
+    else
+      [msg] = MessageExt.decode_from_binary(Packet.packet(pkt, :body))
+
+      begin_at = System.system_time(:millisecond)
+
+      ret =
+        InnerConsumer.Common.process_with_trace(
+          tracer,
+          processor,
+          req.consumer_group,
+          msg.message.topic,
+          [msg]
+        )
+        |> case do
+          :success ->
+            @consume_success
+
+          {:retry_later, _} ->
+            @consume_retry_later
+
+          {:suspend, _, _} ->
+            @consume_suspend
+        end
+
+      res = %ConsumeMessageDirectlyResult{
+        order: false,
+        auto_commit: true,
+        consume_result: ret,
+        spend_time_millis: System.system_time(:millisecond) - begin_at
+      }
+
+      Broker.consume_directly_reply(broker_pid, res)
+    end
   end
 end
