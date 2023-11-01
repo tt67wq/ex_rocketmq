@@ -1,6 +1,70 @@
 defmodule ExRocketmq.Consumer do
   @moduledoc """
   RocketMQ consumer
+
+  This module provides functionality for consuming messages from RocketMQ.
+
+  It defines a `State` struct that holds the state of the consumer and its configuration options.
+
+  ## Example
+
+  1. Start a namesrvrs:
+    ```Elixir
+    {:ok, namesrvs_pid} = Namesrvs.start_link(
+      remotes: [
+       [transport: Transport.Tcp.new(host: "test.rocket-mq.net", port: 31_120)]
+     ],
+     opts: [
+       name: :namesrvs
+     ]
+    )
+    ```
+  2. Define a processor:
+    ```Elixir
+    defmodule MyProcessor do
+
+      alias ExRocketmq.{
+        Consumer.Processor,
+        Models.MessageExt,
+        Typespecs
+      }
+
+      @behaviour Processor
+
+      defstruct []
+
+      @type t :: %__MODULE__{}
+
+      @spec new() :: t()
+      def new, do: %__MODULE__{}
+
+      @spec process(t(), Typespecs.topic(), [MessageExt.t()]) ::
+              Processor.consume_result() | {:error, term()}
+      def process(_, topic, msgs) do
+        msgs
+        |> Enum.each(fn msg ->
+          IO.inspect(msg)
+        end)
+
+        :success
+      end
+    end
+    ```
+
+  3. Start consumer process
+     ```Elixir
+     Consumer.start_link(
+       consumer_group: "GID_POETRY",
+       namesrvs: :namesrvs,
+       processor: MyProcessor.new(),
+       subscriptions: %{"POETRY" => MsgSelector.new(:tag, "*")},
+       trace_enable: true,
+       opts: [
+         name: :consumer
+       ]}
+     )
+     ```
+
   """
 
   defmodule State do
@@ -15,6 +79,12 @@ defmodule ExRocketmq.Consumer do
             task_supervisor: pid() | atom(),
             registry: pid(),
             processor: ExRocketmq.Consumer.Processor.t(),
+            # consume_info_map stores the consume info of each topic
+            # consume info contains:
+            #   1. subscription
+            #   2. broker_datas
+            #   3. mqs
+            #   4. consume task for assigned queue
             consume_info_map: %{
               Typespecs.topic() => {
                 Models.Subscription.t(),
@@ -195,6 +265,18 @@ defmodule ExRocketmq.Consumer do
 
   @type consumer_opts_schema_t :: [unquote(NimbleOptions.option_typespec(@consumer_opts_schema))]
 
+  @doc """
+  Starts a RocketMQ consumer process.
+
+  ## Options
+  #{NimbleOptions.docs(@consumer_opts_schema)}
+
+  ## Examples
+
+      iex> ExRocketmq.Consumer.start_link(%{group_name: "my_group", namesrvs: "localhost:9876"})
+      {:ok, pid}
+
+  """
   @spec start_link(consumer_opts_schema_t()) :: Typespecs.on_start()
   def start_link(opts) do
     opts =
@@ -205,14 +287,38 @@ defmodule ExRocketmq.Consumer do
     GenServer.start_link(__MODULE__, init, opts)
   end
 
+  @doc """
+  stop a RocketMQ consumer process.
+  """
   @spec stop(pid() | atom()) :: :ok
   def stop(consumer), do: GenServer.stop(consumer)
 
+  @doc """
+  Subscribes to a RocketMQ topic with an optional message selector.
+
+  After subscribing, the consumer will start to pull messages from the topic.
+  And if the broker address changes, consumer update the connection to the broker.
+
+  ## Examples
+
+      iex> ExRocketmq.Consumer.subscribe(consumer, "my_topic")
+      :ok
+
+  """
   @spec subscribe(pid() | atom(), Typespecs.topic(), MsgSelector.t()) :: :ok
   def subscribe(consumer, topic, msg_selector \\ %MsgSelector{}) do
     GenServer.call(consumer, {:subscribe, topic, msg_selector})
   end
 
+  @doc """
+  Unsubscribes from a RocketMQ topic.
+
+  ## Examples
+
+      iex> ExRocketmq.Consumer.unsubscribe(consumer, "my_topic")
+      :ok
+
+  """
   @spec unsubscribe(pid() | atom(), Typespecs.topic()) :: :ok
   def unsubscribe(consumer, topic) do
     GenServer.call(consumer, {:unsubscribe, topic})
@@ -301,7 +407,7 @@ defmodule ExRocketmq.Consumer do
     end)
   end
 
-  # sub retry topic
+  # cluster consumer, we have to register retry topic to consume retry msgs
   def handle_continue(
         :on_start,
         %State{
@@ -362,6 +468,7 @@ defmodule ExRocketmq.Consumer do
               | consume_info_map: Map.put(cmap, topic, {sub, broker_datas, mqs, %{}})
             }
 
+            # establish connection to new broker immediately
             do_heartbeat(state)
 
             {:reply, :ok, state}
@@ -386,11 +493,11 @@ defmodule ExRocketmq.Consumer do
       ) do
     topic = with_namespace(topic, namespace)
 
-    cmap =
+    {ret, cmap} =
       Map.pop(cmap, topic)
       |> case do
         {nil, cmap} ->
-          cmap
+          {{:error, "topic #{topic} has never been subscribed"}, cmap}
 
         {{_sub, _broker_datas, _mqs, consume_tasks}, cmap} ->
           # stop consume task
@@ -400,10 +507,10 @@ defmodule ExRocketmq.Consumer do
             Task.Supervisor.terminate_child(task_supervisor, pid)
           end)
 
-          cmap
+          {:ok, cmap}
       end
 
-    {:reply, :ok, %State{state | consume_info_map: cmap}}
+    {:reply, ret, %State{state | consume_info_map: cmap}}
   end
 
   def handle_info(
@@ -423,7 +530,7 @@ defmodule ExRocketmq.Consumer do
         |> case do
           {:ok, {broker_datas, mqs}} ->
             Logger.debug("fetch consume info for topic: #{topic}, mqs: #{inspect(mqs)}")
-            # establish connection to new broker
+            # establish connection to new broker for later use
             connect_to_brokers(broker_datas, registry, broker_dynamic_supervisor)
 
             {:cont, Map.put(acc, topic, {sub, broker_datas, mqs, consume_tasks})}
@@ -439,6 +546,7 @@ defmodule ExRocketmq.Consumer do
     {:noreply, %State{state | consume_info_map: cmap}}
   end
 
+  # send heartbeat every 30s
   def handle_info(
         :heartbeat,
         state
@@ -520,6 +628,8 @@ defmodule ExRocketmq.Consumer do
            }
          } = state
        ) do
+    # For broadcast-type consumers, rebalancing does not require allocating messages from message queues.
+    # It simply needs to perform the consumption tasks for all message queues.
     consume_info_map
     |> Map.to_list()
     |> Enum.reduce(
@@ -577,6 +687,11 @@ defmodule ExRocketmq.Consumer do
            }
          } = state
        ) do
+    # For cluster-type consumers, each consumer needs to evenly distribute all messages
+    # across brokers according to the same allocation strategy.
+    # Whenever the number of consumers changes or the messages in brokers are adjusted,
+    # it will trigger a reassignment.
+    # The consumers assigned messages will perform consumption tasks for each message.
     consume_info_map
     |> Map.to_list()
     |> Enum.reduce_while(
@@ -791,6 +906,7 @@ defmodule ExRocketmq.Consumer do
       consumer_data_set: [
         %ConsumerData{
           group: group_name,
+          # push consumer
           consume_type: "CONSUME_PASSIVELY",
           message_model: (model == :cluster && "Clustering") || "BroadCasting",
           consume_from_where: consume_from_where_str(cfw),
@@ -800,11 +916,10 @@ defmodule ExRocketmq.Consumer do
       ]
     }
 
+    # send heartbeat to all brokers
     broker_dynamic_supervisor
     |> Util.SupervisorHelper.all_pids_under_supervisor()
     |> Task.async_stream(fn pid ->
-      # Logger.debug("send heartbeat to broker: #{inspect(pid)}")
-
       Broker.heartbeat(pid, heartbeat_data)
       |> case do
         :ok ->

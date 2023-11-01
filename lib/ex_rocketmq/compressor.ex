@@ -1,6 +1,14 @@
 defmodule ExRocketmq.Compressor do
   @moduledoc """
-  compress/uncompress behavior
+  This module provides compression and decompression functionality for messages sent to and received from RocketMQ.
+
+  It defines a behavior `ExRocketmq.Compressor` that can be implemented by custom compression modules.
+
+  ## Examples
+
+      iex> ExRocketmq.Compressor.compress(MyCompressor, "Hello World")
+      "compressed data"
+
   """
 
   @callback compress(binary(), keyword()) :: binary()

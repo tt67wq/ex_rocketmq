@@ -18,6 +18,19 @@ defmodule ExRocketmq.Consumer.BalanceStrategy do
   defp delegate(%module{} = m, func, args),
     do: apply(module, func, [m | args])
 
+  @doc """
+  Implementing a strategy to allocate an appropriate message queue for the current client
+
+  ## Examples
+
+      iex> ExRocketmq.Consumer.BalanceStrategy.allocate(
+             ExRocketmq.Consumer.BalanceStrategy.Average.new(),
+             "c1",
+             [mq1, mq2, mq3],
+             [c1, c2, c3]
+           )
+      {:ok, [mq1]}
+  """
   @spec allocate(
           m :: t(),
           client_id :: String.t(),
@@ -29,7 +42,29 @@ defmodule ExRocketmq.Consumer.BalanceStrategy do
 end
 
 defmodule ExRocketmq.Consumer.BalanceStrategy.Average do
-  @moduledoc false
+  @moduledoc """
+  This module implements the balance strategy for RocketMQ consumers.
+
+  This strategy is called 'Average', which allocates the message queues (mq) evenly among the clients (cid).
+  The principle of this Average implementation is as follows:
+
+  - Sort mqs and cid_all.
+  - Divide mqs into len(cid_all) parts.
+  - Allocate the corresponding chunk based on the position of cid in cid_all.
+
+  ## Usage
+
+  1. Create a new instance of the strategy using `new/0` function.
+  2. Call the `allocate/4` function to allocate message queues to a specific client.
+
+  ## Example
+
+      strategy = Average.new()
+      mq_all = [mq1, mq2, mq3, mq4]
+      cid_all = ["client1", "client2", "client3"]
+      {:ok, allocated_mqs} = Average.allocate(strategy, "client2", mq_all, cid_all)
+
+  """
 
   alias ExRocketmq.Consumer.BalanceStrategy
   alias ExRocketmq.Models.{MessageQueue}
