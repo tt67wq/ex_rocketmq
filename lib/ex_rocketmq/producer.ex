@@ -78,9 +78,8 @@ defmodule ExRocketmq.Producer do
   you must implement `ExRocketmq.Producer.Transaction` behaviour, see this [example](https://github.com/tt67wq/ex_rocketmq/blob/master/examples/trans_producer.exs) for more details.
   """
   defmodule State do
-    @moduledoc """
-    The state of the producer GenServer
-    """
+    @moduledoc false
+
     alias ExRocketmq.{Models, Typespecs}
 
     @type t :: %__MODULE__{
@@ -331,6 +330,15 @@ defmodule ExRocketmq.Producer do
     GenServer.cast(producer, {:send_oneway, msgs})
   end
 
+  @doc """
+  Sends a message to the broker as part of a transaction and waits for the broker's response.
+
+  ## Examples
+
+      iex> Producer.send_transaction_msg(producer, %Message{topic: topic, body: "Hello from elixir"})
+      {:ok, response, transaction_state}
+
+  """
   @spec send_transaction_msg(pid() | atom(), Message.t()) ::
           {:ok, SendMsg.Response.t(), Typespecs.transaction_state()} | Typespecs.error_t()
   def send_transaction_msg(producer, msgs) do
@@ -348,6 +356,7 @@ defmodule ExRocketmq.Producer do
       )
 
     {:ok, uniqid} = Util.UniqId.start_link()
+    # we use a task supervisor to maintain all dynamic tasks under this producer
     {:ok, task_supervisor} = Task.Supervisor.start_link()
     {:ok, broker_dynamic_supervisor} = DynamicSupervisor.start_link([])
 
