@@ -136,8 +136,6 @@ defmodule ExRocketmq.Consumer do
 
   use GenServer
 
-  alias ExRocketmq.Models.MessageExt
-
   alias ExRocketmq.{
     Util,
     Typespecs,
@@ -161,7 +159,8 @@ defmodule ExRocketmq.Consumer do
     MessageQueue,
     ConsumeState,
     ConsumeMessageDirectly,
-    ConsumeMessageDirectlyResult
+    ConsumeMessageDirectlyResult,
+    MessageExt
   }
 
   require Logger
@@ -531,7 +530,7 @@ defmodule ExRocketmq.Consumer do
           {:ok, {broker_datas, mqs}} ->
             Logger.debug("fetch consume info for topic: #{topic}, mqs: #{inspect(mqs)}")
             # establish connection to new broker for later use
-            connect_to_brokers(broker_datas, registry, broker_dynamic_supervisor)
+            connect_to_brokers(broker_datas, registry, broker_dynamic_supervisor, self())
 
             {:cont, Map.put(acc, topic, {sub, broker_datas, mqs, consume_tasks})}
 
@@ -581,6 +580,11 @@ defmodule ExRocketmq.Consumer do
         Logger.warning("unimplemented notify code: #{other_code}")
         {:noreply, state}
     end
+  end
+
+  def handle_info(cmd, state) do
+    Logger.error("unimplemented cmd: #{inspect(cmd)}")
+    {:noreply, state}
   end
 
   # ---- private functions ----
@@ -899,8 +903,6 @@ defmodule ExRocketmq.Consumer do
            consume_from_where: cfw
          }
        }) do
-    Logger.debug("do heartbeat")
-
     heartbeat_data = %Heartbeat{
       client_id: cid,
       consumer_data_set: [
@@ -949,24 +951,31 @@ defmodule ExRocketmq.Consumer do
   @spec connect_to_brokers(
           list(BrokerData.t()),
           pid(),
+          pid(),
           pid()
         ) :: :ok
-  defp connect_to_brokers(broker_datas, registry, dynamic_supervisor) do
+  defp connect_to_brokers(broker_datas, registry, dynamic_supervisor, self) do
     broker_datas
     |> Task.async_stream(fn bd ->
-      Broker.get_or_new_broker(
-        bd.broker_name,
-        BrokerData.master_addr(bd),
-        registry,
-        dynamic_supervisor
-      )
+      pid =
+        Broker.get_or_new_broker(
+          bd.broker_name,
+          BrokerData.master_addr(bd),
+          registry,
+          dynamic_supervisor
+        )
 
-      Broker.get_or_new_broker(
-        bd.broker_name,
-        BrokerData.slave_addr(bd),
-        registry,
-        dynamic_supervisor
-      )
+      Broker.controlling_process(pid, self)
+
+      pid =
+        Broker.get_or_new_broker(
+          bd.broker_name,
+          BrokerData.slave_addr(bd),
+          registry,
+          dynamic_supervisor
+        )
+
+      Broker.controlling_process(pid, self)
     end)
     |> Stream.run()
   end

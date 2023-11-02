@@ -160,9 +160,6 @@ defmodule ExRocketmq.Broker do
 
         {:ok, pid} = DynamicSupervisor.start_child(dynamic_supervisor, {__MODULE__, broker_opts})
 
-        # bind self to broker, then notify from broker will send to self
-        controlling_process(pid, self())
-
         pid
 
       [{pid, _}] ->
@@ -189,7 +186,8 @@ defmodule ExRocketmq.Broker do
   @spec stop(pid()) :: :ok
   def stop(broker), do: GenServer.stop(broker)
 
-  defp controlling_process(broker, pid), do: GenServer.cast(broker, {:controlling_process, pid})
+  @spec controlling_process(pid(), pid()) :: :ok
+  def controlling_process(broker, pid), do: GenServer.cast(broker, {:controlling_process, pid})
 
   @spec broker_name(pid()) :: String.t()
   def broker_name(broker), do: GenServer.call(broker, :broker_name)
@@ -713,5 +711,10 @@ defmodule ExRocketmq.Broker do
         GenServer.reply(from, {:error, reason})
         {:noreply, %{state | task_ref: task_ref}}
     end
+  end
+
+  def handle_info(cmd, state) do
+    Logger.warning("broker recv unknown cmd: #{inspect(cmd)}")
+    {:noreply, state}
   end
 end

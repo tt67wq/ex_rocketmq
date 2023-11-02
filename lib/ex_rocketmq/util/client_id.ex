@@ -4,7 +4,7 @@ defmodule ExRocketmq.Util.ClientId do
   """
 
   @spec get() :: String.t()
-  def get(), do: ExRocketmq.Util.Random.generate_id("P") |> get()
+  def get(), do: ExRocketmq.Util.Random.generate_id("CLI") |> get()
 
   @spec get(String.t()) :: String.t()
   def get(name) do
