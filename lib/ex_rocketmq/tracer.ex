@@ -247,7 +247,8 @@ defmodule ExRocketmq.Tracer do
         mq.broker_name,
         BrokerData.master_addr(bd),
         registry,
-        broker_dynamic_supervisor
+        broker_dynamic_supervisor,
+        nil
       )
 
     req = %SendMsg.Request{

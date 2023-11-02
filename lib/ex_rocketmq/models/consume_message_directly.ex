@@ -29,10 +29,6 @@ end
 defmodule ExRocketmq.Models.ConsumeMessageDirectlyResult do
   @moduledoc false
 
-  alias ExRocketmq.{Remote.ExtFields}
-
-  @behaviour ExtFields
-
   defstruct order: false, auto_commit: false, consume_result: 0, remark: "", spend_time_millis: 0
 
   @type t :: %__MODULE__{
@@ -43,7 +39,6 @@ defmodule ExRocketmq.Models.ConsumeMessageDirectlyResult do
           spend_time_millis: non_neg_integer()
         }
 
-  @impl ExtFields
   @spec to_map(t()) :: Typespecs.str_dict()
   def to_map(m) do
     %{
@@ -53,5 +48,12 @@ defmodule ExRocketmq.Models.ConsumeMessageDirectlyResult do
       "remark" => m.remark,
       "spendTimeMillis" => m.spend_time_millis
     }
+  end
+
+  @spec encode(t()) :: Typespecs.body()
+  def encode(m) do
+    m
+    |> to_map()
+    |> Jason.encode!()
   end
 end

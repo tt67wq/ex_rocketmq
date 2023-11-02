@@ -47,7 +47,8 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
         bd.broker_name,
         BrokerData.slave_addr(bd),
         registry,
-        dynamic_supervisor
+        dynamic_supervisor,
+        nil
       )
       |> Common.get_next_offset(
         group_name,

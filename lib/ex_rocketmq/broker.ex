@@ -62,8 +62,7 @@ defmodule ExRocketmq.Broker do
     GetMaxOffset,
     EndTransaction,
     ConsumerSendMsgBack,
-    Lock,
-    ConsumeMessageDirectlyResult
+    Lock
   }
 
   require Packet
@@ -138,33 +137,50 @@ defmodule ExRocketmq.Broker do
 
   ## Examples
 
-      iex> ExRocketmq.Broker.get_or_new_broker("broker0", "localhost:31001", RegistryName, DynamicSupervisorPid)
+      iex> ExRocketmq.Broker.get_or_new_broker("broker0", "localhost:31001", RegistryName, DynamicSupervisorPid, nil)
       #PID<0.123.0>
   """
-  @spec get_or_new_broker(Typespecs.broker_name(), String.t(), atom(), pid()) :: pid()
-  def get_or_new_broker(broker_name, addr, registry, dynamic_supervisor) do
-    Registry.lookup(registry, addr)
-    |> case do
-      [] ->
-        Logger.debug("estabilish new broker connection: #{broker_name}, #{addr}}")
+  @spec get_or_new_broker(
+          Typespecs.broker_name(),
+          String.t(),
+          atom(),
+          pid(),
+          pid() | nil
+        ) ::
+          pid()
+  def get_or_new_broker(broker_name, addr, registry, dynamic_supervisor, notify_pid \\ nil) do
+    pid =
+      Registry.lookup(registry, addr)
+      |> case do
+        [] ->
+          Logger.debug("estabilish new broker connection: #{broker_name}, #{addr}}")
 
-        {host, port} =
-          addr
-          |> Util.Network.parse_addr()
+          {host, port} =
+            addr
+            |> Util.Network.parse_addr()
 
-        broker_opts = [
-          broker_name: broker_name,
-          remote_opts: [transport: Transport.Tcp.new(host: host, port: port)],
-          opts: [name: {:via, Registry, {registry, addr}}]
-        ]
+          broker_opts = [
+            broker_name: broker_name,
+            remote_opts: [transport: Transport.Tcp.new(host: host, port: port)],
+            opts: [name: {:via, Registry, {registry, addr}}]
+          ]
 
-        {:ok, pid} = DynamicSupervisor.start_child(dynamic_supervisor, {__MODULE__, broker_opts})
+          {:ok, pid} =
+            DynamicSupervisor.start_child(dynamic_supervisor, {__MODULE__, broker_opts})
 
-        pid
+          pid
 
-      [{pid, _}] ->
-        pid
+        [{pid, _}] ->
+          pid
+      end
+
+    notify_pid
+    |> is_nil()
+    |> unless do
+      controlling_process(pid, notify_pid)
     end
+
+    pid
   end
 
   @doc """
@@ -186,8 +202,7 @@ defmodule ExRocketmq.Broker do
   @spec stop(pid()) :: :ok
   def stop(broker), do: GenServer.stop(broker)
 
-  @spec controlling_process(pid(), pid()) :: :ok
-  def controlling_process(broker, pid), do: GenServer.cast(broker, {:controlling_process, pid})
+  defp controlling_process(broker, pid), do: GenServer.cast(broker, {:controlling_process, pid})
 
   @spec broker_name(pid()) :: String.t()
   def broker_name(broker), do: GenServer.call(broker, :broker_name)
@@ -545,9 +560,9 @@ defmodule ExRocketmq.Broker do
     end
   end
 
-  @spec consume_directly_reply(pid(), ConsumeMessageDirectlyResult.t()) :: :ok
-  def consume_directly_reply(broker, req) do
-    GenServer.cast(broker, {:one_way, @resp_success, <<>>, ExtFields.to_map(req)})
+  @spec send_reply_pkt(pid(), Packet.t()) :: :ok
+  def send_reply_pkt(broker, pkt) do
+    GenServer.cast(broker, {:reply, pkt})
   end
 
   # ------- server ------
@@ -655,11 +670,16 @@ defmodule ExRocketmq.Broker do
     {:noreply, state}
   end
 
+  def handle_cast({:reply, pkt}, %{remote: remote} = state) do
+    Remote.one_way(remote, pkt)
+    {:noreply, state}
+  end
+
   # The pop_notify function is called periodically to pull messages sent by the broker from the remote.
   # If the broker process has already bound a certain consumer or producer,
   # we will send the messages to them in the format '{:notify, {msg, self()}}'.
   def handle_info(:pop_notify, %{controlling_process: nil} = state) do
-    Logger.warning("controlling process is nil, broker will not notify")
+    # Logger.warning("controlling process is nil, broker will not notify")
     Process.send_after(self(), :pop_notify, 5000)
     {:noreply, state}
   end

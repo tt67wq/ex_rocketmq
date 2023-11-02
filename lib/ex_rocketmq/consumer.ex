@@ -147,7 +147,7 @@ defmodule ExRocketmq.Consumer do
     Tracer
   }
 
-  alias ExRocketmq.Protocol.{ConsumeResult, Request, PullStatus}
+  alias ExRocketmq.Protocol.{ConsumeResult, Request, PullStatus, Response}
 
   alias ExRocketmq.Models.{
     Subscription,
@@ -168,6 +168,7 @@ defmodule ExRocketmq.Consumer do
   require Packet
   require PullStatus
   require ConsumeResult
+  require Response
 
   @consumer_opts_schema [
     consumer_group: [
@@ -261,6 +262,9 @@ defmodule ExRocketmq.Consumer do
   @consume_success ConsumeResult.success()
   @consume_retry_later ConsumeResult.retry_later()
   @consume_suspend ConsumeResult.suspend_current_queue_a_moment()
+
+  # resp
+  @resp_success Response.resp_success()
 
   @type consumer_opts_schema_t :: [unquote(NimbleOptions.option_typespec(@consumer_opts_schema))]
 
@@ -712,7 +716,8 @@ defmodule ExRocketmq.Consumer do
             bd.broker_name,
             BrokerData.slave_addr(bd),
             registry,
-            broker_dynamic_supervisor
+            broker_dynamic_supervisor,
+            self()
           )
 
         with {:ok, cids} <- Broker.get_consumer_list_by_group(broker, group_name),
@@ -954,28 +959,24 @@ defmodule ExRocketmq.Consumer do
           pid(),
           pid()
         ) :: :ok
-  defp connect_to_brokers(broker_datas, registry, dynamic_supervisor, self) do
+  defp connect_to_brokers(broker_datas, registry, dynamic_supervisor, pid) do
     broker_datas
     |> Task.async_stream(fn bd ->
-      pid =
-        Broker.get_or_new_broker(
-          bd.broker_name,
-          BrokerData.master_addr(bd),
-          registry,
-          dynamic_supervisor
-        )
+      Broker.get_or_new_broker(
+        bd.broker_name,
+        BrokerData.master_addr(bd),
+        registry,
+        dynamic_supervisor,
+        pid
+      )
 
-      Broker.controlling_process(pid, self)
-
-      pid =
-        Broker.get_or_new_broker(
-          bd.broker_name,
-          BrokerData.slave_addr(bd),
-          registry,
-          dynamic_supervisor
-        )
-
-      Broker.controlling_process(pid, self)
+      Broker.get_or_new_broker(
+        bd.broker_name,
+        BrokerData.slave_addr(bd),
+        registry,
+        dynamic_supervisor,
+        pid
+      )
     end)
     |> Stream.run()
   end
@@ -1018,14 +1019,24 @@ defmodule ExRocketmq.Consumer do
             @consume_suspend
         end
 
-      res = %ConsumeMessageDirectlyResult{
-        order: false,
-        auto_commit: true,
-        consume_result: ret,
-        spend_time_millis: System.system_time(:millisecond) - begin_at
-      }
+      body =
+        %ConsumeMessageDirectlyResult{
+          order: false,
+          auto_commit: true,
+          consume_result: ret,
+          spend_time_millis: System.system_time(:millisecond) - begin_at
+        }
+        |> ConsumeMessageDirectlyResult.encode()
 
-      Broker.consume_directly_reply(broker_pid, res)
+      reply_pkt =
+        Packet.packet(
+          code: @resp_success,
+          opaque: Packet.packet(pkt, :opaque),
+          flag: 1,
+          body: body
+        )
+
+      Broker.send_reply_pkt(broker_pid, reply_pkt)
     end
   end
 end

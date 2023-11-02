@@ -493,9 +493,9 @@ defmodule ExRocketmq.Producer do
              bd.broker_name,
              BrokerData.master_addr(bd),
              registry,
-             broker_dynamic_supervisor
+             broker_dynamic_supervisor,
+             self()
            ),
-         :ok <- Broker.controlling_process(broker_pid, self()),
          :ok <- Broker.end_transaction(broker_pid, req) do
       send_trace(msg, resp, begin_at, bd, @msg_type_trans_commit, state)
       {:reply, {:ok, resp, transaction_state}, %{state | publish_info_map: pmap}}
@@ -686,9 +686,9 @@ defmodule ExRocketmq.Producer do
              bd.broker_name,
              BrokerData.master_addr(bd),
              registry,
-             broker_dynamic_supervisor
-           ),
-         :ok <- Broker.controlling_process(broker_pid, self()) do
+             broker_dynamic_supervisor,
+             self()
+           ) do
       {:ok,
        %{
          broker_pid: broker_pid,

@@ -89,7 +89,8 @@ defmodule ExRocketmq.InnerConsumer.Order do
         bd.broker_name,
         BrokerData.master_addr(bd),
         registry,
-        dynamic_supervisor
+        dynamic_supervisor,
+        nil
       )
       |> Common.get_next_offset(
         group_name,
@@ -164,7 +165,8 @@ defmodule ExRocketmq.InnerConsumer.Order do
           bd.broker_name,
           addr,
           registry,
-          dynamic_supervisor
+          dynamic_supervisor,
+          nil
         )
       end)
 
