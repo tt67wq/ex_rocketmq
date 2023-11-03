@@ -582,6 +582,7 @@ defmodule ExRocketmq.Producer do
     end)
     |> Stream.run()
 
+    # heartbeat every 30s
     Process.send_after(self(), :heartbeat, 30_000)
 
     {:noreply, state}

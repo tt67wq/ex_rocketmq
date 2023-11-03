@@ -1,6 +1,15 @@
 defmodule ExRocketmq.InnerConsumer.Concurrent do
   @moduledoc """
-  concurrently mq consumer
+  This is an implementation of PullConsumer.
+
+  Rocketmq recommends using PushConsumer, which essentially adds a buffer between
+  pulling messages and processing messages to control the pulling speed
+  through the water level of the buffer.
+
+  Although PushConsumer can bring some performance improvement in consumption,
+  its flow control mechanism and offset management become more complex.
+
+  If you care about this consumption performance, consider using gen_stage as an intermediate buffer layer.
   """
 
   alias ExRocketmq.{
@@ -36,6 +45,7 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
           mq: %MessageQueue{
             queue_id: queue_id
           },
+          # if next_offset is -1, get remote offset first
           next_offset: -1,
           consume_from_where: cfw,
           consume_timestamp: consume_timestamp
@@ -47,8 +57,7 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
         bd.broker_name,
         BrokerData.slave_addr(bd),
         registry,
-        dynamic_supervisor,
-        nil
+        dynamic_supervisor
       )
       |> Common.get_next_offset(
         group_name,

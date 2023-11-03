@@ -1,6 +1,10 @@
 defmodule ExRocketmq.InnerConsumer.Order do
   @moduledoc """
-  orderly mq consumer
+  In the context of sequential consumption,
+  the consumer must possess an MQ lock to prevent other consumers from holding it.
+
+  Each time the lock is acquired, it is maintained for 30 seconds,
+  and only after acquiring the lock will the consumer perform the consumption operation on this MQ.
   """
 
   alias ExRocketmq.{

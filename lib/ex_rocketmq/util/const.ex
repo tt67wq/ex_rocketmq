@@ -1,7 +1,9 @@
 defmodule ExRocketmq.Util.Const do
   @moduledoc """
+  a module to define constants
+  ```Elixir
   defmodule MyApp.Constant do
-  import Const
+    import Const
 
     const :facebook_url, "http://facebook.com/rohanpujaris"
 
@@ -9,6 +11,7 @@ defmodule ExRocketmq.Util.Const do
 
   require MyApp.Constant
   @facebook_url MyApp.Constant.facebook_url  # You can use this line anywhere to get the facebook url.
+  ```
   """
   defmacro const(const_name, const_value) do
     quote do

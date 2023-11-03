@@ -1,6 +1,6 @@
 defmodule ExRocketmq.Util.Debug do
   @moduledoc """
-  The debug tools
+  Debug tools
   """
   require Logger
 
