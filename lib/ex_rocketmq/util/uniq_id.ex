@@ -34,7 +34,7 @@ defmodule ExRocketmq.Util.UniqId do
       iex> ExRocketmq.Util.UniqId.get_uniq_id(pid)
       "0A93667D3B0A0000000063952A000001"
   """
-  @spec get_uniq_id(pid()) :: binary()
+  @spec get_uniq_id(pid() | atom()) :: binary()
   def get_uniq_id(name) do
     :ok =
       Agent.update(name, fn %{next_ts: next, counter: counter} = state ->
@@ -84,7 +84,7 @@ defmodule ExRocketmq.Util.UniqId do
            )
   end
 
-  @spec stop(pid()) :: :ok
+  @spec stop(pid() | atom()) :: :ok
   def stop(pid), do: Agent.stop(pid)
 
   @spec get_pid() :: non_neg_integer()

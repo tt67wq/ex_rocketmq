@@ -86,31 +86,23 @@ defmodule ExRocketmq.Producer do
             client_id: String.t(),
             group_name: String.t(),
             namesrvs: pid() | atom(),
-            task_supervisor: pid(),
-            broker_dynamic_supervisor: pid(),
-            registry: pid(),
-            uniqid: pid(),
             publish_info_map: %{
               Typespecs.topic() => {list(Models.BrokerData.t()), list(Models.MessageQueue.t())}
             },
             selector: ExRocketmq.Producer.MqSelector.t(),
             compress: keyword(),
             transaction_listener: ExRocketmq.Producer.Transaction.t(),
-            tracer: pid() | nil
+            trace_enable: boolean()
           }
 
     defstruct client_id: "",
               group_name: "",
               namesrvs: nil,
-              task_supervisor: nil,
-              broker_dynamic_supervisor: nil,
-              registry: nil,
-              uniqid: nil,
               publish_info_map: %{},
               selector: nil,
               compress: nil,
               transaction_listener: nil,
-              tracer: nil
+              trace_enable: false
   end
 
   require ExRocketmq.Protocol.MsgType
@@ -121,6 +113,7 @@ defmodule ExRocketmq.Producer do
     Util,
     Broker,
     Producer.MqSelector,
+    Producer.Supervisor,
     Compressor,
     Remote.Packet,
     Tracer,
@@ -347,71 +340,76 @@ defmodule ExRocketmq.Producer do
 
   # -------- server ------
   def init(opts) do
-    registry = :"Registry.#{Util.Random.generate_id("P")}"
+    # registry = :"Registry.#{Util.Random.generate_id("P")}"
+
+    # {:ok, _} =
+    #   Registry.start_link(
+    #     keys: :unique,
+    #     name: registry
+    #   )
+
+    # {:ok, uniqid} = Util.UniqId.start_link()
+    # # we use a task supervisor to maintain all dynamic tasks under this producer
+    # {:ok, task_supervisor} = Task.Supervisor.start_link()
+    # {:ok, broker_dynamic_supervisor} = DynamicSupervisor.start_link([])
+
+    # {:ok, tracer} =
+    #   if opts[:trace_enable] do
+    #     Tracer.start_link(namesrvs: opts[:namesrvs])
+    #   else
+    #     {:ok, nil}
+    #   end
+
+    cid = Util.ClientId.get("Producer")
 
     {:ok, _} =
-      Registry.start_link(
-        keys: :unique,
-        name: registry
+      Supervisor.start_link(
+        opts: [
+          cid: cid,
+          trace_enable: opts[:trace_enable],
+          namesrvs: opts[:namesrvs]
+        ]
       )
-
-    {:ok, uniqid} = Util.UniqId.start_link()
-    # we use a task supervisor to maintain all dynamic tasks under this producer
-    {:ok, task_supervisor} = Task.Supervisor.start_link()
-    {:ok, broker_dynamic_supervisor} = DynamicSupervisor.start_link([])
-
-    {:ok, tracer} =
-      if opts[:trace_enable] do
-        Tracer.start_link(namesrvs: opts[:namesrvs])
-      else
-        {:ok, nil}
-      end
 
     {:ok,
      %State{
-       client_id: Util.ClientId.get(),
+       client_id: cid,
        group_name: opts[:group_name],
        namesrvs: opts[:namesrvs],
-       task_supervisor: task_supervisor,
-       broker_dynamic_supervisor: broker_dynamic_supervisor,
-       registry: registry,
-       uniqid: uniqid,
        publish_info_map: %{},
        selector: opts[:selector],
        compress: opts[:compress],
        transaction_listener: opts[:transaction_listener],
-       tracer: tracer
+       trace_enable: opts[:trace_enable]
      }, {:continue, :on_start}}
   end
 
-  def terminate(reason, %State{
-        uniqid: uniqid,
-        broker_dynamic_supervisor: broker_dynamic_supervisor,
-        task_supervisor: task_supervisor,
-        tracer: tracer
-      }) do
+  def terminate(reason, %State{client_id: cid, trace_enable: trace_enable}) do
     Logger.info("producer terminate, reason: #{inspect(reason)}")
 
     # stop uniqid
-    Util.UniqId.stop(uniqid)
+    Util.UniqId.stop(:"UniqId.#{cid}")
 
     # stop all existing tasks
-    Task.Supervisor.children(task_supervisor)
+    :"Task.Supervisor.#{cid}"
+    |> Task.Supervisor.children()
     |> Enum.each(fn pid ->
-      Task.Supervisor.terminate_child(task_supervisor, pid)
+      Task.Supervisor.terminate_child(:"Task.Supervisor.#{cid}", pid)
     end)
 
     # stop all broker
-    broker_dynamic_supervisor
+    :"DynamicSupervisor.#{cid}"
     |> Util.SupervisorHelper.all_pids_under_supervisor()
     |> Enum.each(fn pid ->
-      DynamicSupervisor.terminate_child(broker_dynamic_supervisor, pid)
+      DynamicSupervisor.terminate_child(:"DynamicSupervisor.#{cid}", pid)
     end)
 
-    DynamicSupervisor.stop(broker_dynamic_supervisor)
+    DynamicSupervisor.stop(:"DynamicSupervisor.#{cid}")
 
     # stop tracer
-    unless is_nil(tracer), do: Tracer.stop(tracer)
+    if trace_enable do
+      Tracer.stop(:"Tracer.#{cid}")
+    end
   end
 
   def handle_continue(:on_start, state) do
@@ -453,10 +451,9 @@ defmodule ExRocketmq.Producer do
         {:send_in_transaction, msg},
         _,
         %State{
+          client_id: cid,
           group_name: group_name,
-          transaction_listener: tl,
-          registry: registry,
-          broker_dynamic_supervisor: broker_dynamic_supervisor
+          transaction_listener: tl
         } = state
       ) do
     begin_at = System.system_time(:millisecond)
@@ -492,8 +489,8 @@ defmodule ExRocketmq.Producer do
            Broker.get_or_new_broker(
              bd.broker_name,
              BrokerData.master_addr(bd),
-             registry,
-             broker_dynamic_supervisor,
+             :"Registry.#{cid}",
+             :"DynamicSupervisor.#{cid}",
              self()
            ),
          :ok <- Broker.end_transaction(broker_pid, req) do
@@ -540,9 +537,9 @@ defmodule ExRocketmq.Producer do
   def handle_info(
         {:notify, {pkt, broker_pid}},
         %State{
+          client_id: cid,
           group_name: group_name,
-          transaction_listener: tl,
-          task_supervisor: task_supervisor
+          transaction_listener: tl
         } = state
       ) do
     # Logger.warning("producer receive notify: #{inspect(pkt)}")
@@ -551,7 +548,7 @@ defmodule ExRocketmq.Producer do
       @req_check_transaction_state ->
         # check transaction state
         Task.Supervisor.start_child(
-          task_supervisor,
+          :"Task.Supervisor.#{cid}",
           fn -> notify_check_transaction_state(pkt, tl, group_name, broker_pid) end
         )
 
@@ -566,8 +563,7 @@ defmodule ExRocketmq.Producer do
         :heartbeat,
         %State{
           client_id: cid,
-          group_name: group_name,
-          broker_dynamic_supervisor: broker_dynamic_supervisor
+          group_name: group_name
         } = state
       ) do
     heartbeat_data = %Heartbeat{
@@ -575,7 +571,7 @@ defmodule ExRocketmq.Producer do
       producer_data_set: [%ProducerData{group: group_name}]
     }
 
-    broker_dynamic_supervisor
+    :"DynamicSupervisor.#{cid}"
     |> Util.SupervisorHelper.all_pids_under_supervisor()
     |> Task.async_stream(fn pid ->
       Broker.heartbeat(pid, heartbeat_data)
@@ -646,19 +642,17 @@ defmodule ExRocketmq.Producer do
            }}
           | {:error, any()}
   defp prepare_send_msg_request(msgs, %State{
+         client_id: cid,
          group_name: group_name,
          publish_info_map: pmap,
          namesrvs: namesrvs,
          selector: selector,
-         registry: registry,
-         uniqid: uniqid,
-         compress: compress,
-         broker_dynamic_supervisor: broker_dynamic_supervisor
+         compress: compress
        }) do
     msg =
       msgs
       |> encode_batch()
-      |> set_uniqid(uniqid)
+      |> set_uniqid(:"UniqId.#{cid}")
       |> compress_msg(compress[:compress_over], compress[:compressor], compress[:compress_level])
 
     pmap = update_publish_info(pmap, msg.topic, namesrvs)
@@ -686,8 +680,8 @@ defmodule ExRocketmq.Producer do
            Broker.get_or_new_broker(
              bd.broker_name,
              BrokerData.master_addr(bd),
-             registry,
-             broker_dynamic_supervisor,
+             :"Registry.#{cid}",
+             :"DynamicSupervisor.#{cid}",
              self()
            ) do
       {:ok,
@@ -781,7 +775,7 @@ defmodule ExRocketmq.Producer do
 
   defp encode_batch([msg]), do: msg
 
-  @spec set_uniqid(Message.t(), pid()) :: Message.t()
+  @spec set_uniqid(Message.t(), pid() | atom()) :: Message.t()
   defp set_uniqid(%Message{} = msg, uniqid) do
     case Message.get_property(msg, @property_unique_client_msgid_key) do
       nil ->
@@ -863,7 +857,7 @@ defmodule ExRocketmq.Producer do
           msg_type :: non_neg_integer(),
           state :: State.t()
         ) :: :ok
-  defp send_trace(_, _, _, _, _, %State{tracer: nil}), do: :ok
+  defp send_trace(_, _, _, _, _, %State{trace_enable: false}), do: :ok
 
   defp send_trace(
          %Message{
@@ -879,7 +873,8 @@ defmodule ExRocketmq.Producer do
          bd,
          msg_type,
          %State{
-           tracer: tracer,
+           client_id: cid,
+           trace_enable: true,
            group_name: group_name
          }
        ) do
@@ -907,6 +902,6 @@ defmodule ExRocketmq.Producer do
       ]
     }
 
-    Tracer.send_trace(tracer, trace)
+    Tracer.send_trace(:"Tracer:#{cid}", trace)
   end
 end

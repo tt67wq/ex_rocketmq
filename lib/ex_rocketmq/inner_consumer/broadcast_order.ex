@@ -27,9 +27,8 @@ defmodule ExRocketmq.InnerConsumer.BroadcastOrder do
 
   def pull_msg(
         %ConsumeState{
+          client_id: cid,
           broker_data: bd,
-          registry: registry,
-          broker_dynamic_supervisor: dynamic_supervisor,
           group_name: group_name,
           topic: topic,
           mq: %MessageQueue{
@@ -45,9 +44,8 @@ defmodule ExRocketmq.InnerConsumer.BroadcastOrder do
       Broker.get_or_new_broker(
         bd.broker_name,
         BrokerData.slave_addr(bd),
-        registry,
-        dynamic_supervisor,
-        nil
+        :"Registry.#{cid}",
+        :"DynamicSupervisor.#{cid}"
       )
       |> Common.get_next_offset(
         group_name,
@@ -69,6 +67,7 @@ defmodule ExRocketmq.InnerConsumer.BroadcastOrder do
 
   def pull_msg(
         %ConsumeState{
+          client_id: cid,
           group_name: group_name,
           topic: topic,
           mq: %MessageQueue{
@@ -82,9 +81,7 @@ defmodule ExRocketmq.InnerConsumer.BroadcastOrder do
             sub_string: sub_string,
             class_filter_mode: cfm,
             expression_type: expression_type
-          },
-          registry: registry,
-          broker_dynamic_supervisor: dynamic_supervisor
+          }
         } = task
       ) do
     pull_req = %PullMsg.Request{
@@ -112,8 +109,8 @@ defmodule ExRocketmq.InnerConsumer.BroadcastOrder do
         Broker.get_or_new_broker(
           bd.broker_name,
           addr,
-          registry,
-          dynamic_supervisor
+          :"Registry.#{cid}",
+          :"DynamicSupervisor.#{cid}"
         )
       end)
 

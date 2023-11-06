@@ -8,32 +8,23 @@ defmodule ExRocketmq.Tracer do
 
     alias ExRocketmq.{Typespecs, Models}
 
-    defstruct client_id: nil,
+    defstruct client_id: "",
               namesrvs: nil,
-              uniq_id_provider: nil,
-              broker_dynamic_supervisor: nil,
-              registry: nil,
               broker_datas: [],
               message_queues: [],
-              task_supervisor: nil,
               buffer: []
 
     @type t :: %__MODULE__{
             client_id: String.t(),
-            uniq_id_provider: pid(),
-            namesrvs: pid() | atom(),
-            broker_dynamic_supervisor: pid(),
-            registry: atom(),
             broker_datas: list(Models.BrokerData.t()),
             message_queues: list(Models.MessageQueue.t()),
-            task_supervisor: pid(),
             buffer: list(Models.Trace.t())
           }
   end
 
   use GenServer
 
-  alias ExRocketmq.{Typespecs, Util, Namesrvs, Broker, Exception}
+  alias ExRocketmq.{Typespecs, Util, Namesrvs, Broker, Exception, Trace.Supervisor}
 
   alias ExRocketmq.Models.{
     QueueData,
@@ -76,62 +67,58 @@ defmodule ExRocketmq.Tracer do
     GenServer.start_link(__MODULE__, init, opts)
   end
 
-  @spec stop(pid()) :: :ok
+  @spec stop(pid() | atom()) :: :ok
   def stop(pid) do
     GenServer.stop(pid)
   end
 
-  @spec send_trace(pid(), Trace.t()) :: :ok
+  @spec send_trace(pid() | atom(), Trace.t()) :: :ok
   def send_trace(pid, trace) do
     GenServer.cast(pid, {:send_trace, trace})
   end
 
   # ----------- server callbacks -----------
   def init(opts) do
-    registry = :"Registry.#{Util.Random.generate_id("TC")}"
+    cid = Util.ClientId.get("Trace")
 
     {:ok, _} =
-      Registry.start_link(
-        keys: :unique,
-        name: registry
+      Supervisor.start_link(
+        opts: [
+          cid: cid
+        ]
       )
-
-    {:ok, dynamic_supervisor} = DynamicSupervisor.start_link([])
-    {:ok, task_supervisor} = Task.Supervisor.start_link()
-
-    {:ok, uniqid_provider} = Util.UniqId.start_link()
 
     {:ok,
      %State{
-       client_id: Util.ClientId.get(),
+       client_id: cid,
        namesrvs: opts[:namesrvs],
-       uniq_id_provider: uniqid_provider,
-       broker_dynamic_supervisor: dynamic_supervisor,
-       registry: registry,
        broker_datas: [],
        message_queues: [],
-       task_supervisor: task_supervisor,
        buffer: []
      }, {:continue, :on_start}}
   end
 
   def terminate(reason, %State{
-        broker_dynamic_supervisor: broker_dynamic_supervisor,
-        task_supervisor: task_supervisor
+        client_id: cid
       }) do
     Logger.info("producer terminate, reason: #{inspect(reason)}")
 
     # stop all existing tasks
-    Task.Supervisor.children(task_supervisor)
+    task_supervisor = :"Task.Supervisor.#{cid}"
+
+    task_supervisor
+    |> Task.Supervisor.children()
     |> Enum.each(fn pid ->
       Task.Supervisor.terminate_child(task_supervisor, pid)
     end)
 
     # stop all broker
-    broker_dynamic_supervisor
+    dynamic_supervisor = :"DynamicSupervisor.#{cid}"
+
+    dynamic_supervisor
     |> Util.SupervisorHelper.all_pids_under_supervisor()
     |> Enum.each(fn pid ->
-      DynamicSupervisor.terminate_child(broker_dynamic_supervisor, pid)
+      DynamicSupervisor.terminate_child(dynamic_supervisor, pid)
     end)
   end
 
@@ -144,8 +131,12 @@ defmodule ExRocketmq.Tracer do
 
   def handle_cast(
         {:send_trace, trace},
-        %State{buffer: buffer, uniq_id_provider: uniq_id_provider} = state
+        %State{
+          client_id: cid,
+          buffer: buffer
+        } = state
       ) do
+    uniq_id_provider = :"UniqId.#{cid}"
     trace = %Trace{trace | request_id: Util.UniqId.get_uniq_id(uniq_id_provider)}
     state = %{state | buffer: [trace | buffer]}
 
@@ -210,10 +201,9 @@ defmodule ExRocketmq.Tracer do
   defp emit_trace([], _state), do: :ok
 
   defp emit_trace(traces, %State{
+         client_id: cid,
          message_queues: message_queues,
-         broker_datas: broker_datas,
-         registry: registry,
-         broker_dynamic_supervisor: broker_dynamic_supervisor
+         broker_datas: broker_datas
        }) do
     keys =
       traces
@@ -246,9 +236,8 @@ defmodule ExRocketmq.Tracer do
       Broker.get_or_new_broker(
         mq.broker_name,
         BrokerData.master_addr(bd),
-        registry,
-        broker_dynamic_supervisor,
-        nil
+        :"Registry.#{cid}",
+        :"DynamicSupervisor.#{cid}"
       )
 
     req = %SendMsg.Request{

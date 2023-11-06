@@ -32,12 +32,10 @@ defmodule ExRocketmq.InnerConsumer.Order do
 
   def pull_msg(
         %ConsumeState{
+          client_id: cid,
           lock_ttl_ms: ttl,
           broker_data: bd,
-          registry: registry,
-          broker_dynamic_supervisor: dynamic_supervisor,
           group_name: group_name,
-          client_id: client_id,
           mq: mq
         } = task
       )
@@ -47,13 +45,13 @@ defmodule ExRocketmq.InnerConsumer.Order do
       Broker.get_or_new_broker(
         bd.broker_name,
         BrokerData.master_addr(bd),
-        registry,
-        dynamic_supervisor
+        :"Registry.#{cid}",
+        :"DynamicSupervisor.#{cid}"
       )
 
     req = %Lock.Req{
       consumer_group: group_name,
-      client_id: client_id,
+      client_id: cid,
       mq: [mq]
     }
 
@@ -71,10 +69,9 @@ defmodule ExRocketmq.InnerConsumer.Order do
 
   def pull_msg(
         %ConsumeState{
+          client_id: cid,
           next_offset: -1,
           broker_data: bd,
-          registry: registry,
-          broker_dynamic_supervisor: dynamic_supervisor,
           group_name: group_name,
           topic: topic,
           mq: %MessageQueue{
@@ -92,9 +89,8 @@ defmodule ExRocketmq.InnerConsumer.Order do
       Broker.get_or_new_broker(
         bd.broker_name,
         BrokerData.master_addr(bd),
-        registry,
-        dynamic_supervisor,
-        nil
+        :"Registry.#{cid}",
+        :"DynamicSupervisor.#{cid}"
       )
       |> Common.get_next_offset(
         group_name,
@@ -117,6 +113,7 @@ defmodule ExRocketmq.InnerConsumer.Order do
 
   def pull_msg(
         %ConsumeState{
+          client_id: cid,
           group_name: group_name,
           topic: topic,
           mq: %MessageQueue{
@@ -133,8 +130,6 @@ defmodule ExRocketmq.InnerConsumer.Order do
             class_filter_mode: cfm,
             expression_type: expression_type
           },
-          registry: registry,
-          broker_dynamic_supervisor: dynamic_supervisor,
           lock_ttl_ms: ttl
         } = task
       ) do
@@ -168,9 +163,8 @@ defmodule ExRocketmq.InnerConsumer.Order do
         Broker.get_or_new_broker(
           bd.broker_name,
           addr,
-          registry,
-          dynamic_supervisor,
-          nil
+          :"Registry.#{cid}",
+          :"DynamicSupervisor.#{cid}"
         )
       end)
 
@@ -263,13 +257,21 @@ defmodule ExRocketmq.InnerConsumer.Order do
   defp do_consume(
          [msgs | tail],
          %ConsumeState{
+           client_id: cid,
            topic: topic,
            group_name: group_name,
            processor: processor,
-           tracer: tracer,
+           trace_enable: trace_enable,
            max_reconsume_times: max_reconsume_times
          } = pt
        ) do
+    tracer =
+      if trace_enable do
+        :"Tracer.#{cid}"
+      else
+        nil
+      end
+
     Common.process_with_trace(tracer, processor, group_name, topic, msgs)
     |> case do
       :success ->

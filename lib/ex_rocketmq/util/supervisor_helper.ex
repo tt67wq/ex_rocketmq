@@ -4,7 +4,7 @@ defmodule ExRocketmq.Util.SupervisorHelper do
   @doc """
   return all pids under one supervisor
   """
-  @spec all_pids_under_supervisor(pid()) :: list(pid())
+  @spec all_pids_under_supervisor(pid() | atom()) :: list(pid())
   def all_pids_under_supervisor(broker_dynamic_supervisor) do
     broker_dynamic_supervisor
     |> DynamicSupervisor.which_children()

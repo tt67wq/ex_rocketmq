@@ -125,10 +125,9 @@ defmodule ExRocketmq.InnerConsumer.Common do
   def send_msgs_back(
         msgs,
         %ConsumeState{
+          client_id: cid,
           group_name: group_name,
           broker_data: bd,
-          registry: registry,
-          broker_dynamic_supervisor: dynamic_supervisor,
           max_reconsume_times: max_reconsume_times
         } = pt
       ) do
@@ -136,8 +135,8 @@ defmodule ExRocketmq.InnerConsumer.Common do
       Broker.get_or_new_broker(
         bd.broker_name,
         BrokerData.master_addr(bd),
-        registry,
-        dynamic_supervisor
+        :"Registry.#{cid}",
+        :"DynamicSupervisor.#{cid}"
       )
 
     msgs
@@ -179,7 +178,7 @@ defmodule ExRocketmq.InnerConsumer.Common do
   end
 
   @spec process_with_trace(
-          pid(),
+          atom() | pid() | nil,
           Processor.t(),
           Typespecs.group_name(),
           Typespecs.topic(),

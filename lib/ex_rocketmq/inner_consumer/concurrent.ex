@@ -37,9 +37,8 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
 
   def pull_msg(
         %ConsumeState{
+          client_id: cid,
           broker_data: bd,
-          registry: registry,
-          broker_dynamic_supervisor: dynamic_supervisor,
           group_name: group_name,
           topic: topic,
           mq: %MessageQueue{
@@ -56,8 +55,8 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
       Broker.get_or_new_broker(
         bd.broker_name,
         BrokerData.slave_addr(bd),
-        registry,
-        dynamic_supervisor
+        :"Registry.#{cid}",
+        :"DynamicSupervisor.#{cid}"
       )
       |> Common.get_next_offset(
         group_name,
@@ -79,6 +78,7 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
 
   def pull_msg(
         %ConsumeState{
+          client_id: cid,
           topic: topic,
           group_name: group_name,
           mq: %MessageQueue{
@@ -94,9 +94,7 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
             expression_type: expression_type
           },
           pull_batch_size: pull_batch_size,
-          commit_offset: commit_offset,
-          registry: registry,
-          broker_dynamic_supervisor: dynamic_supervisor
+          commit_offset: commit_offset
         } = pt
       ) do
     pull_req = %PullMsg.Request{
@@ -127,8 +125,8 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
         Broker.get_or_new_broker(
           bd.broker_name,
           addr,
-          registry,
-          dynamic_supervisor
+          :"Registry.#{cid}",
+          :"DynamicSupervisor.#{cid}"
         )
       end)
 
@@ -208,13 +206,21 @@ defmodule ExRocketmq.InnerConsumer.Concurrent do
   defp consume_msgs_concurrently(
          message_exts,
          %ConsumeState{
+           client_id: cid,
            topic: topic,
            consume_batch_size: consume_batch_size,
            group_name: group_name,
            processor: processor,
-           tracer: tracer
+           trace_enable: trace_enable
          } = pt
        ) do
+    tracer =
+      if trace_enable do
+        :"Tracer.#{cid}"
+      else
+        nil
+      end
+
     message_exts
     |> Enum.chunk_every(consume_batch_size)
     |> Task.async_stream(fn msgs ->

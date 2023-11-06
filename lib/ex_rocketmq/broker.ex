@@ -144,7 +144,7 @@ defmodule ExRocketmq.Broker do
           Typespecs.broker_name(),
           String.t(),
           atom(),
-          pid(),
+          pid() | atom(),
           pid() | nil
         ) ::
           pid()
