@@ -95,8 +95,8 @@ defmodule ExRocketmq.Models.Message do
     %{msg | properties: properties}
   end
 
-  def with_properties(%__MODULE__{properties: properties} = msg, properties) do
-    %{msg | properties: Map.merge(properties, properties)}
+  def with_properties(%__MODULE__{properties: properties} = msg, append_properties) do
+    %{msg | properties: Map.merge(properties, append_properties)}
   end
 end
 

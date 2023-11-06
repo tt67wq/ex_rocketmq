@@ -531,7 +531,7 @@ defmodule ExRocketmq.Producer do
           transaction_listener: tl
         } = state
       ) do
-    # Logger.warning("producer receive notify: #{inspect(pkt)}")
+    Logger.debug("producer receive notify: #{inspect(pkt)}")
 
     case Packet.packet(pkt, :code) do
       @req_check_transaction_state ->
