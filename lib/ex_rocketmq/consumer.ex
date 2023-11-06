@@ -90,6 +90,7 @@ defmodule ExRocketmq.Consumer do
                 %{Models.MessageQueue.t() => pid()}
               }
             },
+            supervisor: pid() | atom(),
             trace_enable: boolean(),
             consume_opts: %{
               group_name: Typespecs.group_name(),
@@ -112,6 +113,7 @@ defmodule ExRocketmq.Consumer do
               consume_info_map: %{},
               processor: nil,
               trace_enable: false,
+              supervisor: nil,
               consume_opts: %{
                 group_name: "",
                 retry_topic: "",
@@ -136,7 +138,6 @@ defmodule ExRocketmq.Consumer do
     Namesrvs,
     Broker,
     Consumer.BalanceStrategy,
-    Consumer.Supervisor,
     Remote.Packet,
     InnerConsumer,
     Tracer
@@ -333,8 +334,8 @@ defmodule ExRocketmq.Consumer do
         {topic, {message_selector_to_subscription(topic, msg_selector), [], [], %{}}}
       end)
 
-    {:ok, _} =
-      Supervisor.start_link(
+    {:ok, supervisor} =
+      ExRocketmq.Consumer.Supervisor.start_link(
         opts: [
           cid: cid,
           trace_enable: opts[:trace_enable],
@@ -349,6 +350,7 @@ defmodule ExRocketmq.Consumer do
        consume_info_map: cmap,
        processor: opts[:processor],
        trace_enable: opts[:trace_enable],
+       supervisor: supervisor,
        consume_opts: %{
          group_name: with_namespace(opts[:consumer_group], opts[:namespace]),
          retry_topic: retry_topic(opts[:consumer_group]),
@@ -368,7 +370,8 @@ defmodule ExRocketmq.Consumer do
 
   def terminate(reason, %State{
         client_id: cid,
-        trace_enable: trace_enable
+        trace_enable: trace_enable,
+        supervisor: supervisor
       }) do
     Logger.info("consumer terminate, reason: #{inspect(reason)}")
 
@@ -394,6 +397,8 @@ defmodule ExRocketmq.Consumer do
     |> Enum.each(fn pid ->
       Task.Supervisor.terminate_child(task_supervisor, pid)
     end)
+
+    Supervisor.stop(supervisor, reason)
   end
 
   # cluster consumer, we have to register retry topic to consume retry msgs

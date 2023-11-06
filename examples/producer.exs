@@ -99,30 +99,31 @@ end
 
 alias ExRocketmq.{Producer, Namesrvs, Transport}
 
-Supervisor.start_link(
-  [
-    {Namesrvs,
-     remotes: [
-       [transport: Transport.Tcp.new(host: "test.rocket-mq.net", port: 31_120)]
-     ],
-     opts: [
-       name: :namesrvs
-     ]},
-    {
-      Producer,
-      group_name: "GID_POETRY",
-      namesrvs: :namesrvs,
-      trace_enable: true,
-      opts: [
-        name: :producer
-      ]
-    },
-    {
-      DemoProducer,
-      []
-    }
-  ],
-  strategy: :one_for_one
-)
+{:ok, pid} =
+  Supervisor.start_link(
+    [
+      {Namesrvs,
+       remotes: [
+         [transport: Transport.Tcp.new(host: "test.rocket-mq.net", port: 31_120)]
+       ],
+       opts: [
+         name: :namesrvs
+       ]},
+      {
+        Producer,
+        group_name: "GID_POETRY",
+        namesrvs: :namesrvs,
+        trace_enable: true,
+        opts: [
+          name: :producer
+        ]
+      },
+      {
+        DemoProducer,
+        []
+      }
+    ],
+    strategy: :one_for_one
+  )
 
 Process.sleep(:infinity)

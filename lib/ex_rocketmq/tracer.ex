@@ -12,19 +12,21 @@ defmodule ExRocketmq.Tracer do
               namesrvs: nil,
               broker_datas: [],
               message_queues: [],
-              buffer: []
+              buffer: [],
+              supervisor: nil
 
     @type t :: %__MODULE__{
             client_id: String.t(),
             broker_datas: list(Models.BrokerData.t()),
             message_queues: list(Models.MessageQueue.t()),
-            buffer: list(Models.Trace.t())
+            buffer: list(Models.Trace.t()),
+            supervisor: pid() | atom()
           }
   end
 
   use GenServer
 
-  alias ExRocketmq.{Typespecs, Util, Namesrvs, Broker, Exception, Trace.Supervisor}
+  alias ExRocketmq.{Typespecs, Util, Namesrvs, Broker, Exception}
 
   alias ExRocketmq.Models.{
     QueueData,
@@ -81,8 +83,8 @@ defmodule ExRocketmq.Tracer do
   def init(opts) do
     cid = Util.ClientId.get("Trace")
 
-    {:ok, _} =
-      Supervisor.start_link(
+    {:ok, supervisor} =
+      ExRocketmq.Trace.Supervisor.start_link(
         opts: [
           cid: cid
         ]
@@ -94,12 +96,14 @@ defmodule ExRocketmq.Tracer do
        namesrvs: opts[:namesrvs],
        broker_datas: [],
        message_queues: [],
-       buffer: []
+       buffer: [],
+       supervisor: supervisor
      }, {:continue, :on_start}}
   end
 
   def terminate(reason, %State{
-        client_id: cid
+        client_id: cid,
+        supervisor: supervisor
       }) do
     Logger.info("producer terminate, reason: #{inspect(reason)}")
 
@@ -120,6 +124,8 @@ defmodule ExRocketmq.Tracer do
     |> Enum.each(fn pid ->
       DynamicSupervisor.terminate_child(dynamic_supervisor, pid)
     end)
+
+    Supervisor.stop(supervisor, reason)
   end
 
   def handle_continue(:on_start, state) do

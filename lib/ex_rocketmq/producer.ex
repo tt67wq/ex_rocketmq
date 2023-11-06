@@ -92,7 +92,8 @@ defmodule ExRocketmq.Producer do
             selector: ExRocketmq.Producer.MqSelector.t(),
             compress: keyword(),
             transaction_listener: ExRocketmq.Producer.Transaction.t(),
-            trace_enable: boolean()
+            trace_enable: boolean(),
+            supervisor: pid() | atom()
           }
 
     defstruct client_id: "",
@@ -102,7 +103,8 @@ defmodule ExRocketmq.Producer do
               selector: nil,
               compress: nil,
               transaction_listener: nil,
-              trace_enable: false
+              trace_enable: false,
+              supervisor: nil
   end
 
   require ExRocketmq.Protocol.MsgType
@@ -113,7 +115,6 @@ defmodule ExRocketmq.Producer do
     Util,
     Broker,
     Producer.MqSelector,
-    Producer.Supervisor,
     Compressor,
     Remote.Packet,
     Tracer,
@@ -340,30 +341,10 @@ defmodule ExRocketmq.Producer do
 
   # -------- server ------
   def init(opts) do
-    # registry = :"Registry.#{Util.Random.generate_id("P")}"
-
-    # {:ok, _} =
-    #   Registry.start_link(
-    #     keys: :unique,
-    #     name: registry
-    #   )
-
-    # {:ok, uniqid} = Util.UniqId.start_link()
-    # # we use a task supervisor to maintain all dynamic tasks under this producer
-    # {:ok, task_supervisor} = Task.Supervisor.start_link()
-    # {:ok, broker_dynamic_supervisor} = DynamicSupervisor.start_link([])
-
-    # {:ok, tracer} =
-    #   if opts[:trace_enable] do
-    #     Tracer.start_link(namesrvs: opts[:namesrvs])
-    #   else
-    #     {:ok, nil}
-    #   end
-
     cid = Util.ClientId.get("Producer")
 
-    {:ok, _} =
-      Supervisor.start_link(
+    {:ok, supervisor} =
+      ExRocketmq.Producer.Supervisor.start_link(
         opts: [
           cid: cid,
           trace_enable: opts[:trace_enable],
@@ -380,11 +361,16 @@ defmodule ExRocketmq.Producer do
        selector: opts[:selector],
        compress: opts[:compress],
        transaction_listener: opts[:transaction_listener],
-       trace_enable: opts[:trace_enable]
+       trace_enable: opts[:trace_enable],
+       supervisor: supervisor
      }, {:continue, :on_start}}
   end
 
-  def terminate(reason, %State{client_id: cid, trace_enable: trace_enable}) do
+  def terminate(reason, %State{
+        client_id: cid,
+        trace_enable: trace_enable,
+        supervisor: supervisor
+      }) do
     Logger.info("producer terminate, reason: #{inspect(reason)}")
 
     # stop uniqid
@@ -410,6 +396,9 @@ defmodule ExRocketmq.Producer do
     if trace_enable do
       Tracer.stop(:"Tracer.#{cid}")
     end
+
+    # stop supervisor
+    Supervisor.stop(supervisor, reason)
   end
 
   def handle_continue(:on_start, state) do
