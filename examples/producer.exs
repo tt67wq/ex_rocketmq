@@ -99,7 +99,7 @@ end
 
 alias ExRocketmq.{Producer, Namesrvs, Transport}
 
-{:ok, pid} =
+{:ok, _pid} =
   Supervisor.start_link(
     [
       {Namesrvs,
