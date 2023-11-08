@@ -12,14 +12,12 @@ defmodule ExRocketmq.Tracer do
               namesrvs: nil,
               broker_datas: [],
               message_queues: [],
-              buffer: [],
               supervisor: nil
 
     @type t :: %__MODULE__{
             client_id: String.t(),
             broker_datas: list(Models.BrokerData.t()),
             message_queues: list(Models.MessageQueue.t()),
-            buffer: list(Models.Trace.t()),
             supervisor: pid() | atom()
           }
   end
@@ -55,7 +53,6 @@ defmodule ExRocketmq.Tracer do
 
   @trace_topic "RMQ_SYS_TRACE_TOPIC"
   @trace_group "_INNER_TRACE_PRODUCER"
-  @emit_threshold 100
 
   @type trace_opts_schema_t :: [unquote(NimbleOptions.option_typespec(@trace_opts_schema))]
 
@@ -74,9 +71,9 @@ defmodule ExRocketmq.Tracer do
     GenServer.stop(pid)
   end
 
-  @spec send_trace(pid() | atom(), Trace.t()) :: :ok
-  def send_trace(pid, trace) do
-    GenServer.cast(pid, {:send_trace, trace})
+  @spec send_trace(pid() | atom(), [Trace.t()]) :: :ok
+  def send_trace(pid, traces) do
+    GenServer.cast(pid, {:send_trace, traces})
   end
 
   # ----------- server callbacks -----------
@@ -96,7 +93,6 @@ defmodule ExRocketmq.Tracer do
        namesrvs: opts[:namesrvs],
        broker_datas: [],
        message_queues: [],
-       buffer: [],
        supervisor: supervisor
      }, {:continue, :on_start}}
   end
@@ -125,6 +121,9 @@ defmodule ExRocketmq.Tracer do
       DynamicSupervisor.terminate_child(dynamic_supervisor, pid)
     end)
 
+    # stop buffer
+    Util.Buffer.stop(:"Buffer.#{cid}")
+
     Supervisor.stop(supervisor, reason)
   end
 
@@ -136,26 +135,32 @@ defmodule ExRocketmq.Tracer do
   end
 
   def handle_cast(
-        {:send_trace, trace},
+        {:send_trace, traces},
         %State{
-          client_id: cid,
-          buffer: buffer
+          client_id: cid
         } = state
       ) do
     uniq_id_provider = :"UniqId.#{cid}"
-    trace = %Trace{trace | request_id: Util.UniqId.get_uniq_id(uniq_id_provider)}
-    state = %{state | buffer: [trace | buffer]}
 
-    state =
-      if Enum.count(buffer) + 1 >= @emit_threshold do
-        Task.start(fn ->
-          emit_trace(buffer, state)
-        end)
+    traces =
+      traces
+      |> Enum.map(fn x ->
+        %Trace{
+          x
+          | request_id: Util.UniqId.get_uniq_id(uniq_id_provider)
+        }
+      end)
 
-        %{state | buffer: []}
-      else
-        state
-      end
+    buffer = :"Buffer.#{cid}"
+
+    Util.Buffer.put(buffer, traces)
+    |> case do
+      :ok ->
+        :ok
+
+      {:error, :full} ->
+        Logger.error("trace buffer is full, discard trace")
+    end
 
     {:noreply, state}
   end
@@ -176,10 +181,21 @@ defmodule ExRocketmq.Tracer do
     {:noreply, state}
   end
 
-  def handle_info(:flush, %State{buffer: buffer} = state) do
-    emit_trace(buffer, state)
-    Process.send_after(self(), :flush, 1_000)
-    {:noreply, %{state | buffer: []}}
+  def handle_info(
+        :flush,
+        %State{
+          client_id: cid
+        } = state
+      ) do
+    :"Buffer.#{cid}"
+    |> Util.Buffer.take()
+    |> emit_trace(state)
+    |> case do
+      0 -> Process.send_after(self(), :flush, 1_000)
+      _ -> Process.send_after(self(), :flush, 0)
+    end
+
+    {:noreply, state}
   end
 
   # ------ private functions ------
@@ -203,8 +219,8 @@ defmodule ExRocketmq.Tracer do
     end
   end
 
-  @spec emit_trace(list(Trace.t()), State.t()) :: any()
-  defp emit_trace([], _state), do: :ok
+  @spec emit_trace(list(Trace.t()), State.t()) :: non_neg_integer()
+  defp emit_trace([], _state), do: 0
 
   defp emit_trace(traces, %State{
          client_id: cid,
@@ -216,8 +232,6 @@ defmodule ExRocketmq.Tracer do
       |> Enum.map(&trace_keys(&1))
       |> List.flatten()
       |> Enum.uniq()
-
-    # |> Util.Debug.debug()
 
     body =
       traces
@@ -255,15 +269,9 @@ defmodule ExRocketmq.Tracer do
       properties: Message.encode_properties(msg)
     }
 
-    Broker.sync_send_message(broker, req, msg.body)
-    |> case do
-      {:ok, _} ->
-        # Logger.debug("emit trace success")
-        :ok
+    Broker.one_way_send_message(broker, req, msg.body)
 
-      {:error, reason} ->
-        Logger.error("emit trace error: #{inspect(reason)}")
-    end
+    Enum.count(traces)
   end
 
   @spec trace_keys(Trace.t()) :: list(String.t())

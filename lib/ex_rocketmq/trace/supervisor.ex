@@ -3,7 +3,7 @@ defmodule ExRocketmq.Trace.Supervisor do
 
   use Supervisor
 
-  alias ExRocketmq.Util.UniqId
+  alias ExRocketmq.Util.{UniqId, Buffer}
 
   def start_link(opts) do
     {init, opts} =
@@ -14,13 +14,14 @@ defmodule ExRocketmq.Trace.Supervisor do
   end
 
   def init(opts) do
-    {cid, _opts} = Keyword.pop(opts, :cid)
+    {cid, _opts} = Keyword.pop!(opts, :cid)
 
     children = [
       {Registry, keys: :unique, name: :"Registry.#{cid}"},
       {Task.Supervisor, name: :"Task.Supervisor.#{cid}"},
       {DynamicSupervisor, name: :"DynamicSupervisor.#{cid}"},
-      {UniqId, name: :"UniqId.#{cid}"}
+      {UniqId, name: :"UniqId.#{cid}"},
+      {Buffer, name: :"Buffer.#{cid}", size: 4096}
     ]
 
     Supervisor.init(children, strategy: :one_for_one)

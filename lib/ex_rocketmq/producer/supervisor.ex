@@ -16,7 +16,7 @@ defmodule ExRocketmq.Producer.Supervisor do
   end
 
   def init(opts) do
-    {cid, opts} = Keyword.pop(opts, :cid)
+    {cid, opts} = Keyword.pop!(opts, :cid)
 
     children = [
       {Registry, keys: :unique, name: :"Registry.#{cid}"},

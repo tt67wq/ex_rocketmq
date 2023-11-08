@@ -867,6 +867,12 @@ defmodule ExRocketmq.Producer do
            group_name: group_name
          }
        ) do
+    store_host =
+      bd
+      |> BrokerData.master_addr()
+      |> String.split(":")
+      |> List.first()
+
     trace = %Trace{
       type: :pub,
       timestamp: System.system_time(:millisecond),
@@ -880,7 +886,7 @@ defmodule ExRocketmq.Producer do
           topic: topic,
           tags: Message.get_property(msg, "TAGS", ""),
           keys: Message.get_property(msg, "KEYS", ""),
-          store_host: BrokerData.master_addr(bd),
+          store_host: store_host,
           client_host: Util.Network.local_ip_addr(),
           body_length: byte_size(body),
           msg_type: msg_type,
@@ -891,6 +897,6 @@ defmodule ExRocketmq.Producer do
       ]
     }
 
-    Tracer.send_trace(:"Tracer:#{cid}", trace)
+    Tracer.send_trace(:"Tracer.#{cid}", [trace])
   end
 end

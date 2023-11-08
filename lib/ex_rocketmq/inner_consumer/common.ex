@@ -232,8 +232,6 @@ defmodule ExRocketmq.InnerConsumer.Common do
 
     begin_at = System.system_time(:millisecond)
 
-    Tracer.send_trace(tracer, before_trace)
-
     ret = Processor.process(processor, topic, msgs)
 
     after_trace = %Trace{
@@ -246,7 +244,7 @@ defmodule ExRocketmq.InnerConsumer.Common do
       items: items
     }
 
-    Tracer.send_trace(tracer, after_trace)
+    Tracer.send_trace(tracer, [before_trace, after_trace])
 
     ret
   end
