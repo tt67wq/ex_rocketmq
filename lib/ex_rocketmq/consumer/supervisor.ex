@@ -19,7 +19,8 @@ defmodule ExRocketmq.Consumer.Supervisor do
     children = [
       {Registry, keys: :unique, name: :"Registry.#{cid}"},
       {Task.Supervisor, name: :"Task.Supervisor.#{cid}"},
-      {DynamicSupervisor, name: :"DynamicSupervisor.#{cid}"}
+      {DynamicSupervisor, name: :"DynamicSupervisor.#{cid}"},
+      {ExRocketmq.Consumer.BuffManager, name: :"BuffManager.#{cid}"}
     ]
 
     children =

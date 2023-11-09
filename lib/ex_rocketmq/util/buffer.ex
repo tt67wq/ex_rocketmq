@@ -72,7 +72,11 @@ defmodule ExRocketmq.Util.Buffer do
 
   """
   @spec put(atom(), [any()], non_neg_integer()) :: :ok | {:error, :full}
-  def put(name, items, timeout \\ 5000) do
+  def put(name, items \\ [], timeout \\ 5000)
+
+  def put(_name, [], _timeout), do: :ok
+
+  def put(name, items, timeout) do
     Agent.get_and_update(name, __MODULE__, :handle_put, [items], timeout)
   end
 

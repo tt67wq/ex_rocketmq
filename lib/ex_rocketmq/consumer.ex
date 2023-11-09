@@ -72,6 +72,8 @@ defmodule ExRocketmq.Consumer do
 
     alias ExRocketmq.{Typespecs, Models}
 
+    @type puller :: pid()
+    @type processor :: pid()
     @type t :: %__MODULE__{
             client_id: String.t(),
             namesrvs: pid() | atom(),
@@ -87,7 +89,7 @@ defmodule ExRocketmq.Consumer do
                 Models.Subscription.t(),
                 list(Models.BrokerData.t()),
                 list(Models.MessageQueue.t()),
-                %{Models.MessageQueue.t() => pid()}
+                %{Models.MessageQueue.t() => {puller(), processor()}}
               }
             },
             supervisor: pid() | atom(),
@@ -140,7 +142,10 @@ defmodule ExRocketmq.Consumer do
     Consumer.BalanceStrategy,
     Remote.Packet,
     InnerConsumer,
-    Tracer
+    Tracer,
+    Puller,
+    ProcessQueue,
+    Consumer.BuffManager
   }
 
   alias ExRocketmq.Protocol.{ConsumeResult, Request, PullStatus, Response}
@@ -153,7 +158,6 @@ defmodule ExRocketmq.Consumer do
     ConsumerData,
     BrokerData,
     MessageQueue,
-    ConsumeState,
     ConsumeMessageDirectly,
     ConsumeMessageDirectlyResult,
     MessageExt
@@ -635,12 +639,14 @@ defmodule ExRocketmq.Consumer do
       fn {topic, {sub, broker_datas, mqs, consume_tasks}}, acc ->
         to_stop =
           consume_tasks
-          |> Map.reject(fn {mq, _pid} -> Enum.member?(mqs, mq) end)
+          |> Map.reject(fn {mq, _} -> Enum.member?(mqs, mq) end)
 
         # terminate consume task
-        Enum.each(to_stop, fn {mq, pid} ->
+        Enum.each(to_stop, fn {mq, {pull_pid, process_pid}} ->
           Logger.warning("stop consume task: #{inspect(mq)}")
-          Task.Supervisor.terminate_child(:"Task.Supervisor.#{cid}", pid)
+          Task.Supervisor.terminate_child(:"Task.Supervisor.#{cid}", pull_pid)
+          Task.Supervisor.terminate_child(:"Task.Supervisor.#{cid}", process_pid)
+          BuffManager.delete_buff(:"BuffManager.#{cid}", topic, mq.queue_id)
         end)
 
         # to start consume task: in allocated_mqs but not in consume_tasks
@@ -654,8 +660,13 @@ defmodule ExRocketmq.Consumer do
 
             Logger.warning("new consume task for mq: #{inspect(mq)}")
 
-            {:ok, tid} = new_consume_task(:"Task.Supervisor.#{cid}", mq, bd, topic, sub, state)
-            {mq, tid}
+            {:ok, pull_pid} =
+              new_pull_task(:"Task.Supervisor.#{cid}", mq.queue_id, bd, topic, sub, state)
+
+            {:ok, process_pid} =
+              new_process_task(:"Task.Supervisor.#{cid}", topic, mq.queue_id, bd, state)
+
+            {mq, {pull_pid, process_pid}}
           end)
 
         current_consume_task =
@@ -714,12 +725,14 @@ defmodule ExRocketmq.Consumer do
           # to stop consume task: in consume_tasks but not in allocated_mqs
           to_stop =
             consume_tasks
-            |> Map.reject(fn {mq, _pid} -> Enum.member?(allocated_mqs, mq) end)
+            |> Map.reject(fn {mq, _} -> Enum.member?(allocated_mqs, mq) end)
 
           # terminate consume task
-          Enum.each(to_stop, fn {mq, pid} ->
+          Enum.each(to_stop, fn {mq, {pull_pid, process_pid}} ->
             Logger.warning("stop consume task: #{inspect(mq)}")
-            Task.Supervisor.terminate_child(:"Task.Supervisor.#{cid}", pid)
+            Task.Supervisor.terminate_child(:"Task.Supervisor.#{cid}", pull_pid)
+            Task.Supervisor.terminate_child(:"Task.Supervisor.#{cid}", process_pid)
+            BuffManager.delete_buff(:"BuffManager.#{cid}", topic, mq.queue_id)
           end)
 
           # to start consume task: in allocated_mqs but not in consume_tasks
@@ -733,8 +746,13 @@ defmodule ExRocketmq.Consumer do
 
               Logger.warning("new consume task for mq: #{inspect(mq)}")
 
-              {:ok, tid} = new_consume_task(:"Task.Supervisor.#{cid}", mq, bd, topic, sub, state)
-              {mq, tid}
+              {:ok, pull_pid} =
+                new_pull_task(:"Task.Supervisor.#{cid}", mq.queue_id, bd, topic, sub, state)
+
+              {:ok, process_pid} =
+                new_process_task(:"Task.Supervisor.#{cid}", topic, mq.queue_id, bd, state)
+
+              {mq, {pull_pid, process_pid}}
             end)
 
           current_consume_task =
@@ -759,60 +777,96 @@ defmodule ExRocketmq.Consumer do
     end)
   end
 
-  @spec new_consume_task(
+  @spec new_pull_task(
           pid() | atom(),
-          MessageQueue.t(),
+          non_neg_integer(),
           BrokerData.t(),
           Typespecs.topic(),
           Subscription.t(),
           State.t()
         ) :: {:ok, pid()}
 
-  defp new_consume_task(task_supervisor, mq, bd, topic, sub, %State{
-         client_id: cid,
-         processor: processor,
-         consume_opts: %{
-           group_name: group_name,
-           model: :broadcast,
-           consume_from_where: cfw,
-           consume_timestamp: consume_timestamp,
-           consume_orderly: consume_orderly,
-           post_subscription_when_pull: post_subscription_when_pull,
-           pull_batch_size: pull_batch_size,
-           consume_batch_size: consume_batch_size,
-           max_reconsume_times: max_reconsume_times
+  defp new_pull_task(
+         task_supervisor,
+         queue_id,
+         bd,
+         topic,
+         sub,
+         %State{
+           client_id: cid,
+           consume_opts: %{
+             group_name: group_name,
+             model: :broadcast,
+             consume_from_where: cfw,
+             consume_timestamp: consume_timestamp,
+             post_subscription_when_pull: post_subscription_when_pull,
+             pull_batch_size: pull_batch_size
+           }
          }
-       }) do
-    inner_consumer =
+       ) do
+    Task.Supervisor.start_child(
+      task_supervisor,
+      fn ->
+        Puller.Broadcast.run(%Puller.State{
+          client_id: cid,
+          group_name: group_name,
+          topic: topic,
+          queue_id: queue_id,
+          buff_manager: :"BuffManager.#{cid}",
+          broker_data: bd,
+          consume_from_where: cfw,
+          consume_timestamp: consume_timestamp,
+          pull_batch_size: pull_batch_size,
+          post_subscription_when_pull: post_subscription_when_pull,
+          subscription: sub
+        })
+      end,
+      restart: :transient
+    )
+  end
+
+  defp new_pull_task(
+         task_supervisor,
+         queue_id,
+         bd,
+         topic,
+         sub,
+         %State{
+           client_id: cid,
+           consume_opts: %{
+             group_name: group_name,
+             model: :cluster,
+             consume_from_where: cfw,
+             consume_timestamp: consume_timestamp,
+             consume_orderly: consume_orderly,
+             post_subscription_when_pull: post_subscription_when_pull,
+             pull_batch_size: pull_batch_size
+           }
+         }
+       ) do
+    puller =
       if consume_orderly do
-        InnerConsumer.BroadcastOrder
+        Puller.Locked
       else
-        InnerConsumer.BroadcastConcurrent
+        Puller.Normal
       end
 
     Task.Supervisor.start_child(
       task_supervisor,
       fn ->
-        apply(inner_consumer, :pull_msg, [
-          %ConsumeState{
-            task_id: Util.Random.generate_id("T"),
+        apply(puller, :run, [
+          %Puller.State{
             client_id: cid,
             group_name: group_name,
             topic: topic,
+            queue_id: queue_id,
+            buff_manager: :"BuffManager.#{cid}",
             broker_data: bd,
-            mq: mq,
-            subscription: sub,
             consume_from_where: cfw,
             consume_timestamp: consume_timestamp,
-            post_subscription_when_pull: post_subscription_when_pull,
-            commit_offset_enable: false,
-            commit_offset: 0,
             pull_batch_size: pull_batch_size,
-            consume_batch_size: consume_batch_size,
-            # use a negative number to indicate that we need to get remote offset
-            next_offset: -1,
-            processor: processor,
-            max_reconsume_times: max_reconsume_times
+            post_subscription_when_pull: post_subscription_when_pull,
+            subscription: sub
           }
         ])
       end,
@@ -820,58 +874,54 @@ defmodule ExRocketmq.Consumer do
     )
   end
 
-  defp new_consume_task(task_supervisor, mq, bd, topic, sub, %State{
-         client_id: cid,
-         processor: processor,
-         trace_enable: trace_enable,
-         consume_opts: %{
-           group_name: group_name,
-           model: :cluster,
-           consume_from_where: cfw,
-           consume_timestamp: consume_timestamp,
-           consume_orderly: consume_orderly,
-           post_subscription_when_pull: post_subscription_when_pull,
-           pull_batch_size: pull_batch_size,
-           consume_batch_size: consume_batch_size,
-           max_reconsume_times: max_reconsume_times
+  @spec new_process_task(
+          pid() | atom(),
+          Typespecs.topic(),
+          non_neg_integer(),
+          BrokerData.t(),
+          State.t()
+        ) :: {:ok, pid()}
+
+  defp new_process_task(
+         task_supervisor,
+         topic,
+         queue_id,
+         broker_data,
+         %State{
+           client_id: cid,
+           processor: processor,
+           trace_enable: trace_enable,
+           consume_opts: %{
+             group_name: group_name,
+             consume_orderly: consume_orderly
+           }
          }
-       }) do
-    inner_consumer =
+       ) do
+    process_module =
       if consume_orderly do
-        InnerConsumer.Order
+        ProcessQueue.Order
       else
-        InnerConsumer.Concurrent
+        ProcessQueue.Concurrent
       end
 
-    Task.Supervisor.start_child(
-      task_supervisor,
-      fn ->
-        apply(inner_consumer, :pull_msg, [
-          %ConsumeState{
-            task_id: Util.Random.generate_id("T"),
+    Task.Supervisor.start_child(task_supervisor, fn ->
+      apply(
+        process_module,
+        :run,
+        [
+          %ProcessQueue.State{
             client_id: cid,
             group_name: group_name,
             topic: topic,
-            broker_data: bd,
-            mq: mq,
-            trace_enable: trace_enable,
-            subscription: sub,
-            consume_from_where: cfw,
-            consume_timestamp: consume_timestamp,
-            post_subscription_when_pull: post_subscription_when_pull,
-            commit_offset_enable: false,
-            commit_offset: 0,
-            pull_batch_size: pull_batch_size,
-            consume_batch_size: consume_batch_size,
-            # use a negative number to indicate that we need to get remote offset
-            next_offset: -1,
+            queue_id: queue_id,
+            buff_manager: :"BuffManager.#{cid}",
+            broker_data: broker_data,
             processor: processor,
-            max_reconsume_times: max_reconsume_times
+            trace_enable: trace_enable
           }
-        ])
-      end,
-      restart: :transient
-    )
+        ]
+      )
+    end)
   end
 
   @spec do_heartbeat(State.t()) :: :ok
