@@ -158,7 +158,7 @@ defmodule ExRocketmq.Util.Buffer do
       if touch >= gc_freq do
         # gc
         :ets.select_delete(buff, [
-          {{:"$1", :"$2"}, [{:>=, :"$1", buff_size + Enum.count(items)}], [:"$2"]}
+          {{:"$1", :"$2"}, [{:>=, :"$1", buff_size + Enum.count(items)}], [true]}
         ])
 
         {:ok, %__MODULE__{state | buff_size: buff_size + Enum.count(items), touch: 0}}
