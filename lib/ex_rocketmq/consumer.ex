@@ -141,7 +141,6 @@ defmodule ExRocketmq.Consumer do
     Broker,
     Consumer.BalanceStrategy,
     Remote.Packet,
-    InnerConsumer,
     Tracer,
     Puller,
     ProcessQueue,
@@ -1033,7 +1032,7 @@ defmodule ExRocketmq.Consumer do
         end
 
       ret =
-        InnerConsumer.Common.process_with_trace(
+        ProcessQueue.Common.process_with_trace(
           tracer,
           processor,
           req.consumer_group,
