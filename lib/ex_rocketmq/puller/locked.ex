@@ -139,6 +139,7 @@ defmodule ExRocketmq.Puller.Locked do
 
       _ ->
         # buffer is full, suspend for a while
+        Logger.warning("process queue is busy, buffer is full, suspend for a while")
         Process.sleep(1000)
         run(%State{state | lock_ttl: new_ttl(ttl, now)})
     end

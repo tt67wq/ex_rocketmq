@@ -13,6 +13,8 @@ defmodule ExRocketmq.Puller.Broadcast do
     BrokerData
   }
 
+  require Logger
+
   def run(%State{next_offset: -1} = state) do
     # get remote offset
     {:ok, offset} = Common.get_next_offset(state)
@@ -26,6 +28,7 @@ defmodule ExRocketmq.Puller.Broadcast do
           holding_msgs: []
         } = state
       ) do
+    # no need to commit offset for broadcast puller
     req = Common.new_pull_request(state, 0, false)
 
     broker =
@@ -69,6 +72,7 @@ defmodule ExRocketmq.Puller.Broadcast do
 
       _ ->
         # buffer is full, suspend for a while
+        Logger.warning("process queue is busy, buffer is full, suspend for a while")
         Process.sleep(1000)
         run(state)
     end

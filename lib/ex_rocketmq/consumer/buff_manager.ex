@@ -1,5 +1,20 @@
 defmodule ExRocketmq.Consumer.BuffManager do
-  @moduledoc false
+  @moduledoc """
+  BuffManager is responsible for managing buffers for RocketMQ consumers.
+
+  ## Usage
+
+  To use BuffManager, you need to start it using `start_link/1` function and provide a name:
+
+      {:ok, pid} = ExRocketmq.Consumer.BuffManager.start_link(name: :buff_manager)
+
+  Once started, you can use the `get_or_new/3` function to retrieve or create a buffer for a specific topic and queue ID.
+
+  ## Example
+
+      {:buff, offset, commit} = ExRocketmq.Consumer.BuffManager.get_or_new(:buff_manager, "my_topic", 1)
+
+  """
 
   use Agent
 

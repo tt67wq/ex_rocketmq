@@ -1,6 +1,7 @@
 defmodule ExRocketmq.Puller.Normal do
   @moduledoc false
 
+  require Logger
   alias ExRocketmq.{
     Util,
     Broker,
@@ -76,6 +77,7 @@ defmodule ExRocketmq.Puller.Normal do
 
       _ ->
         # buffer is full, suspend for a while
+        Logger.warning("process queue is busy, buffer is full, suspend for a while")
         Process.sleep(1000)
         run(state)
     end
