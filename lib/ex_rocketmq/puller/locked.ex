@@ -1,5 +1,7 @@
 defmodule ExRocketmq.Puller.Locked do
-  @moduledoc false
+  @moduledoc """
+  Similar to the normal puller, but it will first try to acquire a lock on the queue
+  """
 
   alias ExRocketmq.{
     Util,
@@ -85,7 +87,7 @@ defmodule ExRocketmq.Puller.Locked do
         } = state
       ) do
     now = System.system_time(:millisecond)
-    {_buff, commit_offset, commit?} = BuffManager.get_or_new(buff_manager, topic, queue_id)
+    {buff, commit_offset, commit?} = BuffManager.get_or_new(buff_manager, topic, queue_id)
     req = Common.new_pull_request(state, commit_offset, commit?)
 
     broker =
@@ -115,7 +117,8 @@ defmodule ExRocketmq.Puller.Locked do
           state
           | holding_msgs: msgs,
             next_offset: next_offset,
-            lock_ttl: new_ttl(ttl, now)
+            lock_ttl: new_ttl(ttl, now),
+            buff: buff
         })
     end
   end
@@ -126,13 +129,24 @@ defmodule ExRocketmq.Puller.Locked do
           queue_id: queue_id,
           holding_msgs: msgs,
           buff_manager: buff_manager,
-          lock_ttl: ttl
+          lock_ttl: ttl,
+          buff: buff
         } = state
       ) do
     now = System.system_time(:millisecond)
-    {buff, _, _} = BuffManager.get_or_new(buff_manager, topic, queue_id)
 
-    Util.Buffer.put(buff, msgs)
+    buff =
+      buff
+      |> is_nil()
+      |> if do
+        {buff, _, _} = BuffManager.get_or_new(buff_manager, topic, queue_id)
+        buff
+      else
+        buff
+      end
+
+    buff
+    |> Util.Buffer.put(msgs)
     |> case do
       :ok ->
         run(%State{state | holding_msgs: [], lock_ttl: new_ttl(ttl, now)})

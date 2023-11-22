@@ -21,6 +21,7 @@ defmodule ExRocketmq.Puller.State do
             pull_batch_size: 32,
             post_subscription_when_pull: false,
             subscription: nil,
+            buff: nil,
             holding_msgs: [],
             lock_ttl: -1
 
@@ -37,6 +38,7 @@ defmodule ExRocketmq.Puller.State do
           pull_batch_size: non_neg_integer(),
           post_subscription_when_pull: boolean(),
           subscription: Subscription.t(),
+          buff: atom(),
           holding_msgs: [MessageExt.t()],
           lock_ttl: integer()
         }

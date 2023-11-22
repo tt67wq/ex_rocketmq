@@ -1,7 +1,19 @@
 defmodule ExRocketmq.Puller.Normal do
-  @moduledoc false
+  @moduledoc """
+  This module contains the implementation of the normal puller for RocketMQ.
+  It handles pulling messages from the broker and processing them.
+
+  The `run/1` function is the entry point for the puller. It retrieves the next offset
+  and continues running.
+
+  Note: This module assumes the presence of other modules and structs from the
+  `ExRocketmq` and `ExRocketmq.Models` namespaces.
+
+  For more information, refer to the RocketMQ documentation.
+  """
 
   require Logger
+
   alias ExRocketmq.{
     Util,
     Broker,
@@ -30,7 +42,7 @@ defmodule ExRocketmq.Puller.Normal do
           holding_msgs: []
         } = state
       ) do
-    {_buff, commit_offset, commit?} = BuffManager.get_or_new(buff_manager, topic, queue_id)
+    {buff, commit_offset, commit?} = BuffManager.get_or_new(buff_manager, topic, queue_id)
     req = Common.new_pull_request(state, commit_offset, commit?)
 
     broker =
@@ -56,7 +68,7 @@ defmodule ExRocketmq.Puller.Normal do
         run(state)
 
       {msgs, next_offset} ->
-        run(%State{state | holding_msgs: msgs, next_offset: next_offset})
+        run(%State{state | holding_msgs: msgs, next_offset: next_offset, buff: buff})
     end
   end
 
@@ -65,12 +77,22 @@ defmodule ExRocketmq.Puller.Normal do
           topic: topic,
           queue_id: queue_id,
           holding_msgs: msgs,
-          buff_manager: buff_manager
+          buff_manager: buff_manager,
+          buff: buff
         } = state
       ) do
-    {buff, _, _} = BuffManager.get_or_new(buff_manager, topic, queue_id)
+    buff =
+      buff
+      |> is_nil()
+      |> if do
+        {buff, _, _} = BuffManager.get_or_new(buff_manager, topic, queue_id)
+        buff
+      else
+        buff
+      end
 
-    Util.Buffer.put(buff, msgs)
+    buff
+    |> Util.Buffer.put(msgs)
     |> case do
       :ok ->
         run(%State{state | holding_msgs: []})

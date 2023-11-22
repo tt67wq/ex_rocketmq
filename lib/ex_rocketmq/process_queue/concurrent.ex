@@ -1,5 +1,9 @@
 defmodule ExRocketmq.ProcessQueue.Concurrent do
-  @moduledoc false
+  @moduledoc """
+  This module provides functions for concurrent message processing.
+
+  This module contains the `run/1` function, which is used to process messages concurrently.
+  """
 
   alias ExRocketmq.{
     Util,

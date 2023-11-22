@@ -77,12 +77,15 @@ defmodule ExRocketmq.Models.BrokerData do
   def master_addr(%__MODULE__{broker_addrs: %{"0" => addr}}), do: addr
 
   @spec slave_addr(t()) :: String.t()
-  def slave_addr(%__MODULE__{broker_addrs: addrs}) do
+  def slave_addr(%__MODULE__{broker_addrs: addrs} = bd) do
     addrs
     |> Map.to_list()
     |> Enum.filter(fn {k, _} -> k != "0" end)
-    |> Enum.map(fn {_, v} -> v end)
-    |> Enum.random()
+    |> case do
+      # no slave, use master
+      [] -> master_addr(bd)
+      list -> list |> Enum.random() |> elem(1)
+    end
   end
 end
 
