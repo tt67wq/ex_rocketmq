@@ -16,4 +16,5 @@
   "nestru": {:hex, :nestru, "0.3.3", "50793bb15031479b50d6b4b6abc3f7699a9c3822b3eaabe745d070a154e8f5d8", [:mix], [], "hexpm", "fa248b779c182896b01feb28686abc79de975018a2c30e282cd1d8c18fb715ae"},
   "nimble_options": {:hex, :nimble_options, "0.5.2", "42703307b924880f8c08d97719da7472673391905f528259915782bb346e0a1b", [:mix], [], "hexpm", "4da7f904b915fd71db549bcdc25f8d56f378ef7ae07dc1d372cbe72ba950dce0"},
   "nimble_parsec": {:hex, :nimble_parsec, "1.4.0", "51f9b613ea62cfa97b25ccc2c1b4216e81df970acd8e16e8d1bdc58fef21370d", [:mix], [], "hexpm", "9c565862810fb383e9838c1dd2d7d2c437b3d13b267414ba6af33e50d2d1cf28"},
+  "styler": {:hex, :styler, "0.10.2", "e00d88032002da8882f1010079861cf4603b46bf50e40bb662b3e6311c295b13", [:mix], [], "hexpm", "b32766d9993ee04abe1229436f4654fcfaa530ce9d270cb0532d93b156e35fbf"},
 }

@@ -12,19 +12,15 @@ defmodule ExRocketmq.Puller.Normal do
   For more information, refer to the RocketMQ documentation.
   """
 
+  alias ExRocketmq.Broker
+  alias ExRocketmq.Consumer.BuffManager
+  alias ExRocketmq.Models.BrokerData
+  alias ExRocketmq.Puller.Common
+  alias ExRocketmq.Puller.State
+  alias ExRocketmq.Stats
+  alias ExRocketmq.Util
+
   require Logger
-
-  alias ExRocketmq.{
-    Util,
-    Broker,
-    Puller.State,
-    Puller.Common,
-    Consumer.BuffManager
-  }
-
-  alias ExRocketmq.Models.{
-    BrokerData
-  }
 
   def run(%State{next_offset: -1} = state) do
     # get remote offset
@@ -38,47 +34,43 @@ defmodule ExRocketmq.Puller.Normal do
           mq: mq,
           buff_manager: buff_manager,
           broker_data: bd,
-          holding_msgs: []
+          holding_msgs: [],
+          round: round,
+          rt: rt
         } = state
       ) do
+    # report first
+    Stats.puller_report(:"Stats.#{cid}", mq, false, 0, round, rt)
+
     {buff, commit_offset, commit?} = BuffManager.get_or_new(buff_manager, mq)
     req = Common.new_pull_request(state, commit_offset, commit?)
 
-    broker =
+    if_result =
       if commit? do
         BrokerData.master_addr(bd)
       else
         BrokerData.slave_addr(bd)
       end
-      |> then(fn addr ->
-        Broker.get_or_new_broker(
-          bd.broker_name,
-          addr,
-          :"Registry.#{cid}",
-          :"DynamicSupervisor.#{cid}"
-        )
+
+    broker =
+      then(if_result, fn addr ->
+        Broker.get_or_new_broker(bd.broker_name, addr, :"Registry.#{cid}", :"DynamicSupervisor.#{cid}")
       end)
 
-    Common.pull_from_broker(broker, req, state)
+    broker
+    |> Common.pull_from_broker(req, state)
     |> case do
-      {[], _} ->
+      {[], _, cost} ->
         # pull failed or no new msgs, suspend for a while
         Process.sleep(5000)
-        run(state)
+        run(%State{state | round: round + 1, rt: rt + cost})
 
-      {msgs, next_offset} ->
-        run(%State{state | holding_msgs: msgs, next_offset: next_offset, buff: buff})
+      {msgs, next_offset, cost} ->
+        run(%State{state | holding_msgs: msgs, next_offset: next_offset, buff: buff, round: round + 1, rt: rt + cost})
     end
   end
 
-  def run(
-        %State{
-          mq: mq,
-          holding_msgs: msgs,
-          buff_manager: buff_manager,
-          buff: buff
-        } = state
-      ) do
+  def run(%State{mq: mq, holding_msgs: msgs, buff_manager: buff_manager, buff: buff} = state) do
     buff =
       buff
       |> is_nil()

@@ -1,23 +1,18 @@
 defmodule ExRocketmq.ProcessQueue.Common do
   @moduledoc false
-  alias ExRocketmq.{
-    Broker,
-    Consumer.Processor,
-    Tracer,
-    Util,
-    Typespecs,
-    Protocol.ConsumeReturnType,
-    ProcessQueue.State
-  }
-
-  alias ExRocketmq.Models.{
-    MessageExt,
-    Trace,
-    TraceItem,
-    Message,
-    ConsumerSendMsgBack,
-    BrokerData
-  }
+  alias ExRocketmq.Broker
+  alias ExRocketmq.Consumer.Processor
+  alias ExRocketmq.Models.BrokerData
+  alias ExRocketmq.Models.ConsumerSendMsgBack
+  alias ExRocketmq.Models.Message
+  alias ExRocketmq.Models.MessageExt
+  alias ExRocketmq.Models.Trace
+  alias ExRocketmq.Models.TraceItem
+  alias ExRocketmq.ProcessQueue.State
+  alias ExRocketmq.Protocol.ConsumeReturnType
+  alias ExRocketmq.Tracer
+  alias ExRocketmq.Typespecs
+  alias ExRocketmq.Util
 
   require ConsumeReturnType
   require Logger
@@ -39,15 +34,14 @@ defmodule ExRocketmq.ProcessQueue.Common do
 
   def process_with_trace(tracer, processor, group, topic, msgs) do
     items =
-      msgs
-      |> Enum.flat_map(fn %MessageExt{
-                            message: m,
-                            msg_id: msg_id,
-                            store_timestamp: store_timestamp,
-                            store_size: store_size,
-                            reconsume_times: reconsume_times,
-                            store_host: store_host
-                          } ->
+      Enum.flat_map(msgs, fn %MessageExt{
+                               message: m,
+                               msg_id: msg_id,
+                               store_timestamp: store_timestamp,
+                               store_size: store_size,
+                               reconsume_times: reconsume_times,
+                               store_host: store_host
+                             } ->
         m
         |> Message.get_property("TRACE_ON")
         |> case do
@@ -107,12 +101,7 @@ defmodule ExRocketmq.ProcessQueue.Common do
 
   def send_msgs_back(
         msgs,
-        %State{
-          client_id: cid,
-          group_name: group_name,
-          broker_data: bd,
-          max_reconsume_times: max_reconsume_times
-        } = state
+        %State{client_id: cid, group_name: group_name, broker_data: bd, max_reconsume_times: max_reconsume_times} = state
       ) do
     broker =
       Broker.get_or_new_broker(
@@ -126,7 +115,8 @@ defmodule ExRocketmq.ProcessQueue.Common do
     |> Task.async_stream(fn msg ->
       Logger.debug("send msg back: #{msg.message.topic}-#{msg.commit_log_offset}")
 
-      Broker.consumer_send_msg_back(broker, %ConsumerSendMsgBack{
+      broker
+      |> Broker.consumer_send_msg_back(%ConsumerSendMsgBack{
         group: group_name,
         offset: msg.commit_log_offset,
         delay_level: msg.delay_level,
@@ -143,8 +133,10 @@ defmodule ExRocketmq.ProcessQueue.Common do
           msg
       end
     end)
-    |> Stream.reject(fn {_, x} -> is_nil(x) end)
-    |> Enum.to_list()
+    |> Enum.reduce([], fn
+      {:ok, nil}, acc -> acc
+      {:ok, msg}, acc -> [msg | acc]
+    end)
     |> case do
       [] ->
         :ok
@@ -153,9 +145,7 @@ defmodule ExRocketmq.ProcessQueue.Common do
         Logger.warning("send msgs back failed: #{inspect(msgs)}")
         Process.sleep(5000)
 
-        msgs
-        |> Enum.map(fn {_, msg} -> msg end)
-        |> send_msgs_back(state)
+        send_msgs_back(msgs, state)
     end
   end
 end

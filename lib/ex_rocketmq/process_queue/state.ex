@@ -1,16 +1,11 @@
 defmodule ExRocketmq.ProcessQueue.State do
   @moduledoc false
 
-  alias ExRocketmq.{
-    Typespecs,
-    Consumer,
-    Processor
-  }
-
-  alias ExRocketmq.Models.{
-    BrokerData,
-    MessageQueue
-  }
+  alias ExRocketmq.Consumer
+  alias ExRocketmq.Models.BrokerData
+  alias ExRocketmq.Models.MessageQueue
+  alias ExRocketmq.Processor
+  alias ExRocketmq.Typespecs
 
   defstruct client_id: "",
             group_name: "",
@@ -21,7 +16,10 @@ defmodule ExRocketmq.ProcessQueue.State do
             processor: nil,
             consume_batch_size: 32,
             trace_enable: false,
-            max_reconsume_times: 3
+            max_reconsume_times: 3,
+            round: 0,
+            rt: 0,
+            failed_msg_cnt: 0
 
   @type t :: %__MODULE__{
           client_id: String.t(),
@@ -33,6 +31,9 @@ defmodule ExRocketmq.ProcessQueue.State do
           processor: Processor.t(),
           consume_batch_size: non_neg_integer(),
           trace_enable: boolean(),
-          max_reconsume_times: non_neg_integer()
+          max_reconsume_times: non_neg_integer(),
+          round: non_neg_integer(),
+          rt: non_neg_integer(),
+          failed_msg_cnt: non_neg_integer()
         }
 end

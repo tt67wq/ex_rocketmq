@@ -1,14 +1,11 @@
 defmodule ExRocketmq.Puller.State do
   @moduledoc false
 
-  alias ExRocketmq.{Typespecs}
-
-  alias ExRocketmq.Models.{
-    BrokerData,
-    Subscription,
-    MessageExt,
-    MessageQueue
-  }
+  alias ExRocketmq.Models.BrokerData
+  alias ExRocketmq.Models.MessageExt
+  alias ExRocketmq.Models.MessageQueue
+  alias ExRocketmq.Models.Subscription
+  alias ExRocketmq.Typespecs
 
   defstruct client_id: "",
             group_name: "",
@@ -23,7 +20,10 @@ defmodule ExRocketmq.Puller.State do
             subscription: nil,
             buff: nil,
             holding_msgs: [],
-            lock_ttl: -1
+            lock_ttl: -1,
+            round: 0,
+            last_lock_timestamp: 0,
+            rt: 0
 
   @type t :: %__MODULE__{
           client_id: String.t(),
@@ -39,6 +39,9 @@ defmodule ExRocketmq.Puller.State do
           subscription: Subscription.t(),
           buff: atom(),
           holding_msgs: [MessageExt.t()],
-          lock_ttl: integer()
+          lock_ttl: integer(),
+          round: non_neg_integer(),
+          last_lock_timestamp: non_neg_integer(),
+          rt: non_neg_integer()
         }
 end

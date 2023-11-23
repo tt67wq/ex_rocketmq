@@ -1,24 +1,19 @@
 defmodule ExRocketmq.Puller.Common do
   @moduledoc false
 
-  alias ExRocketmq.{
-    Broker,
-    Typespecs,
-    Puller.State,
-    Util,
-    Protocol.PullStatus
-  }
-
-  alias ExRocketmq.Models.{
-    QueryConsumerOffset,
-    GetMaxOffset,
-    SearchOffset,
-    BrokerData,
-    PullMsg,
-    MessageExt,
-    Subscription,
-    MessageQueue
-  }
+  alias ExRocketmq.Broker
+  alias ExRocketmq.Models.BrokerData
+  alias ExRocketmq.Models.GetMaxOffset
+  alias ExRocketmq.Models.MessageExt
+  alias ExRocketmq.Models.MessageQueue
+  alias ExRocketmq.Models.PullMsg
+  alias ExRocketmq.Models.QueryConsumerOffset
+  alias ExRocketmq.Models.SearchOffset
+  alias ExRocketmq.Models.Subscription
+  alias ExRocketmq.Protocol.PullStatus
+  alias ExRocketmq.Puller.State
+  alias ExRocketmq.Typespecs
+  alias ExRocketmq.Util
 
   require Logger
   require PullStatus
@@ -90,7 +85,8 @@ defmodule ExRocketmq.Puller.Common do
           {:ok, non_neg_integer()} | Typespecs.error_t()
   defp get_offset_by_timestamp(broker, topic, queue_id, consume_timestamp) do
     if retry_topic?(topic) do
-      Broker.get_max_offset(broker, %GetMaxOffset{
+      broker
+      |> Broker.get_max_offset(%GetMaxOffset{
         topic: topic,
         queue_id: queue_id
       })
@@ -99,7 +95,8 @@ defmodule ExRocketmq.Puller.Common do
         _ -> {:error, :get_max_offset_error}
       end
     else
-      Broker.search_offset_by_timestamp(broker, %SearchOffset{
+      broker
+      |> Broker.search_offset_by_timestamp(%SearchOffset{
         topic: topic,
         queue_id: queue_id,
         timestamp: consume_timestamp
@@ -128,44 +125,42 @@ defmodule ExRocketmq.Puller.Common do
           PullMsg.Request.t(),
           State.t()
         ) ::
-          {[MessageExt.t()], non_neg_integer()}
-  def pull_from_broker(
-        broker,
-        %PullMsg.Request{} = req,
-        %State{
-          mq: %MessageQueue{topic: topic, queue_id: queue_id}
-        }
-      ) do
-    Broker.pull_message(broker, req)
-    |> case do
-      {:ok,
-       %PullMsg.Response{
-         status: status,
-         next_begin_offset: next_begin_offset,
-         messages: message_exts
-       }} ->
-        case status do
-          @pull_status_found ->
-            {message_exts, next_begin_offset}
+          {msgs :: [MessageExt.t()], next_offset :: non_neg_integer(), cost :: non_neg_integer()}
+  def pull_from_broker(broker, %PullMsg.Request{} = req, %State{mq: %MessageQueue{topic: topic, queue_id: queue_id}}) do
+    since = System.system_time(:millisecond)
 
-          @pull_status_no_new_msg ->
-            {[], 0}
+    {msgs, next_offset} =
+      broker
+      |> Broker.pull_message(req)
+      |> case do
+        {:ok,
+         %PullMsg.Response{
+           status: status,
+           next_begin_offset: next_begin_offset,
+           messages: message_exts
+         }} ->
+          case status do
+            @pull_status_found ->
+              {message_exts, next_begin_offset}
 
-          @pull_status_no_matched_msg ->
-            {[], 0}
+            @pull_status_no_new_msg ->
+              {[], 0}
 
-          status ->
-            Logger.error("invalid pull message status result: #{inspect(status)}")
-            {[], 0}
-        end
+            @pull_status_no_matched_msg ->
+              {[], 0}
 
-      {:error, reason} ->
-        Logger.error(
-          "pull message error: #{inspect(reason)}, topic: #{topic}, queue: #{queue_id}"
-        )
+            status ->
+              Logger.error("invalid pull message status result: #{inspect(status)}")
+              {[], 0}
+          end
 
-        {[], 0}
-    end
+        {:error, reason} ->
+          Logger.error("pull message error: #{inspect(reason)}, topic: #{topic}, queue: #{queue_id}")
+
+          {[], 0}
+      end
+
+    {msgs, next_offset, System.system_time(:millisecond) - since}
   end
 
   @spec new_pull_request(
@@ -181,11 +176,7 @@ defmodule ExRocketmq.Puller.Common do
           next_offset: next_offset,
           pull_batch_size: pull_batch_size,
           post_subscription_when_pull: post_subscription_when_pull,
-          subscription: %Subscription{
-            sub_string: sub_string,
-            class_filter_mode: cfm,
-            expression_type: expression_type
-          }
+          subscription: %Subscription{sub_string: sub_string, class_filter_mode: cfm, expression_type: expression_type}
         },
         commit_offset,
         commit?

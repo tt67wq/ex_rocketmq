@@ -7,8 +7,7 @@ defmodule ExRocketmq.Consumer.Supervisor do
 
   def start_link(opts) do
     {init, opts} =
-      opts
-      |> Keyword.pop(:opts)
+      Keyword.pop(opts, :opts)
 
     Supervisor.start_link(__MODULE__, init, opts)
   end
@@ -20,7 +19,8 @@ defmodule ExRocketmq.Consumer.Supervisor do
       {Registry, keys: :unique, name: :"Registry.#{cid}"},
       {Task.Supervisor, name: :"Task.Supervisor.#{cid}"},
       {DynamicSupervisor, name: :"DynamicSupervisor.#{cid}"},
-      {ExRocketmq.Consumer.BuffManager, name: :"BuffManager.#{cid}"}
+      {ExRocketmq.Consumer.BuffManager, name: :"BuffManager.#{cid}"},
+      {ExRocketmq.Stats, name: :"Stats.#{cid}"}
     ]
 
     children =

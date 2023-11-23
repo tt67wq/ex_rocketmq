@@ -1,17 +1,13 @@
 defmodule ExRocketmq.Puller.Broadcast do
   @moduledoc false
 
-  alias ExRocketmq.{
-    Util,
-    Broker,
-    Puller.State,
-    Puller.Common,
-    Consumer.BuffManager
-  }
-
-  alias ExRocketmq.Models.{
-    BrokerData
-  }
+  alias ExRocketmq.Broker
+  alias ExRocketmq.Consumer.BuffManager
+  alias ExRocketmq.Models.BrokerData
+  alias ExRocketmq.Puller.Common
+  alias ExRocketmq.Puller.State
+  alias ExRocketmq.Stats
+  alias ExRocketmq.Util
 
   require Logger
 
@@ -21,13 +17,10 @@ defmodule ExRocketmq.Puller.Broadcast do
     run(%{state | next_offset: offset})
   end
 
-  def run(
-        %State{
-          client_id: cid,
-          broker_data: bd,
-          holding_msgs: []
-        } = state
-      ) do
+  def run(%State{client_id: cid, mq: mq, broker_data: bd, holding_msgs: [], round: round, rt: rt} = state) do
+    # report
+    Stats.puller_report(:"Stats.#{cid}", mq, false, 0, round, rt)
+
     # no need to commit offset for broadcast puller
     req = Common.new_pull_request(state, 0, false)
 
@@ -43,28 +36,24 @@ defmodule ExRocketmq.Puller.Broadcast do
         )
       end)
 
-    Common.pull_from_broker(broker, req, state)
+    broker
+    |> Common.pull_from_broker(req, state)
     |> case do
-      {[], _} ->
+      {[], _, cost} ->
         # pull failed or no new msgs, suspend for a while
         Process.sleep(5000)
-        run(state)
+        run(%State{state | round: round + 1, rt: rt + cost})
 
-      {msgs, next_offset} ->
-        run(%State{state | holding_msgs: msgs, next_offset: next_offset})
+      {msgs, next_offset, cost} ->
+        run(%State{state | holding_msgs: msgs, next_offset: next_offset, round: round + 1, rt: rt + cost})
     end
   end
 
-  def run(
-        %State{
-          mq: mq,
-          holding_msgs: msgs,
-          buff_manager: buff_manager
-        } = state
-      ) do
+  def run(%State{mq: mq, holding_msgs: msgs, buff_manager: buff_manager} = state) do
     {buff, _, _} = BuffManager.get_or_new(buff_manager, mq)
 
-    Util.Buffer.put(buff, msgs)
+    buff
+    |> Util.Buffer.put(msgs)
     |> case do
       :ok ->
         run(%State{state | holding_msgs: []})
