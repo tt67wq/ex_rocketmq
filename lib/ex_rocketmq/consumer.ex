@@ -642,7 +642,7 @@ defmodule ExRocketmq.Consumer do
 
         # terminate consume task
         Enum.each(to_stop, fn {mq, {pull_pid, process_pid}} ->
-          terminate_consume_task(topic, mq, cid, pull_pid, process_pid)
+          terminate_consume_task(mq, cid, pull_pid, process_pid)
         end)
 
         # to start consume task: in allocated_mqs but not in consume_tasks
@@ -654,7 +654,7 @@ defmodule ExRocketmq.Consumer do
               broker_datas
               |> Enum.find(fn bd -> bd.broker_name == mq.broker_name end)
 
-            {mq, new_consume_task(topic, cid, mq, bd, sub, state)}
+            {mq, new_consume_task(cid, mq, bd, sub, state)}
           end)
 
         current_consume_task =
@@ -717,7 +717,7 @@ defmodule ExRocketmq.Consumer do
 
           # terminate consume task
           Enum.each(to_stop, fn {mq, {pull_pid, process_pid}} ->
-            terminate_consume_task(topic, mq, cid, pull_pid, process_pid)
+            terminate_consume_task(mq, cid, pull_pid, process_pid)
           end)
 
           # to start consume task: in allocated_mqs but not in consume_tasks
@@ -729,7 +729,7 @@ defmodule ExRocketmq.Consumer do
                 broker_datas
                 |> Enum.find(fn bd -> bd.broker_name == mq.broker_name end)
 
-              {mq, new_consume_task(topic, cid, mq, bd, sub, state)}
+              {mq, new_consume_task(cid, mq, bd, sub, state)}
             end)
 
           current_consume_task =
@@ -756,18 +756,16 @@ defmodule ExRocketmq.Consumer do
 
   @spec new_pull_task(
           pid() | atom(),
-          non_neg_integer(),
+          MessageQueue.t(),
           BrokerData.t(),
-          Typespecs.topic(),
           Subscription.t(),
           State.t()
         ) :: {:ok, pid()}
 
   defp new_pull_task(
          task_supervisor,
-         queue_id,
+         mq,
          bd,
-         topic,
          sub,
          %State{
            client_id: cid,
@@ -787,8 +785,7 @@ defmodule ExRocketmq.Consumer do
         Puller.Broadcast.run(%Puller.State{
           client_id: cid,
           group_name: group_name,
-          topic: topic,
-          queue_id: queue_id,
+          mq: mq,
           buff_manager: :"BuffManager.#{cid}",
           broker_data: bd,
           consume_from_where: cfw,
@@ -804,9 +801,8 @@ defmodule ExRocketmq.Consumer do
 
   defp new_pull_task(
          task_supervisor,
-         queue_id,
+         mq,
          bd,
-         topic,
          sub,
          %State{
            client_id: cid,
@@ -835,8 +831,7 @@ defmodule ExRocketmq.Consumer do
           %Puller.State{
             client_id: cid,
             group_name: group_name,
-            topic: topic,
-            queue_id: queue_id,
+            mq: mq,
             buff_manager: :"BuffManager.#{cid}",
             broker_data: bd,
             consume_from_where: cfw,
@@ -853,16 +848,14 @@ defmodule ExRocketmq.Consumer do
 
   @spec new_process_task(
           pid() | atom(),
-          Typespecs.topic(),
-          non_neg_integer(),
+          MessageQueue.t(),
           BrokerData.t(),
           State.t()
         ) :: {:ok, pid()}
 
   defp new_process_task(
          task_supervisor,
-         topic,
-         queue_id,
+         mq,
          broker_data,
          %State{
            client_id: cid,
@@ -889,8 +882,7 @@ defmodule ExRocketmq.Consumer do
           %ProcessQueue.State{
             client_id: cid,
             group_name: group_name,
-            topic: topic,
-            queue_id: queue_id,
+            mq: mq,
             buff_manager: :"BuffManager.#{cid}",
             broker_data: broker_data,
             processor: processor,
@@ -1049,21 +1041,21 @@ defmodule ExRocketmq.Consumer do
     end
   end
 
-  defp terminate_consume_task(topic, mq, cid, pull_pid, process_pid) do
+  defp terminate_consume_task(mq, cid, pull_pid, process_pid) do
     Logger.warning("stop consume task: #{inspect(mq)}")
     Task.Supervisor.terminate_child(:"Task.Supervisor.#{cid}", pull_pid)
     Task.Supervisor.terminate_child(:"Task.Supervisor.#{cid}", process_pid)
-    BuffManager.delete_buff(:"BuffManager.#{cid}", topic, mq.queue_id)
+    BuffManager.delete_buff(:"BuffManager.#{cid}", mq)
   end
 
-  defp new_consume_task(topic, cid, mq, bd, sub, state) do
+  defp new_consume_task(cid, mq, bd, sub, state) do
     Logger.warning("new consume task for mq: #{inspect(mq)}")
 
     {:ok, pull_pid} =
-      new_pull_task(:"Task.Supervisor.#{cid}", mq.queue_id, bd, topic, sub, state)
+      new_pull_task(:"Task.Supervisor.#{cid}", mq, bd, sub, state)
 
     {:ok, process_pid} =
-      new_process_task(:"Task.Supervisor.#{cid}", topic, mq.queue_id, bd, state)
+      new_process_task(:"Task.Supervisor.#{cid}", mq, bd, state)
 
     {pull_pid, process_pid}
   end

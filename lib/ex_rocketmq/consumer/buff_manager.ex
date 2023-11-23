@@ -12,15 +12,18 @@ defmodule ExRocketmq.Consumer.BuffManager do
 
   ## Example
 
-      {:buff, offset, commit} = ExRocketmq.Consumer.BuffManager.get_or_new(:buff_manager, "my_topic", 1)
+      {:buff, offset, commit} = ExRocketmq.Consumer.BuffManager.get_or_new(:buff_manager, %MessageQueue{topic: "my_topic", queue_id: 1})
 
   """
 
   use Agent
 
   alias ExRocketmq.{
-    Util,
-    Typespecs
+    Util
+  }
+
+  alias ExRocketmq.Models.{
+    MessageQueue
   }
 
   defstruct []
@@ -36,9 +39,9 @@ defmodule ExRocketmq.Consumer.BuffManager do
   defp supervisor(name), do: :"ds_#{name}"
   defp table(name), do: :"buff_store_#{name}"
 
-  @spec get_or_new(name :: atom(), topic :: Typespecs.topic(), queue_id :: non_neg_integer()) ::
+  @spec get_or_new(name :: atom(), MessageQueue.t()) ::
           {buff :: atom(), offset :: non_neg_integer(), commit? :: boolean()}
-  def get_or_new(name, topic, queue_id) do
+  def get_or_new(name, %MessageQueue{topic: topic, queue_id: queue_id}) do
     tb = table(name)
 
     tb
@@ -59,9 +62,9 @@ defmodule ExRocketmq.Consumer.BuffManager do
     end
   end
 
-  @spec delete_buff(name :: atom(), topic :: Typespecs.topic(), queue_id :: non_neg_integer()) ::
+  @spec delete_buff(name :: atom(), MessageQueue.t()) ::
           boolean()
-  def delete_buff(name, topic, queue_id) do
+  def delete_buff(name, %MessageQueue{topic: topic, queue_id: queue_id}) do
     tb = table(name)
 
     tb
@@ -78,12 +81,11 @@ defmodule ExRocketmq.Consumer.BuffManager do
 
   @spec update_offset(
           name :: atom(),
-          topic :: Typespecs.topic(),
-          queue_id :: non_neg_integer(),
+          mq :: MessageQueue.t(),
           offset :: non_neg_integer()
         ) ::
           boolean()
-  def update_offset(name, topic, queue_id, offset) do
+  def update_offset(name, %MessageQueue{topic: topic, queue_id: queue_id}, offset) do
     name
     |> table()
     |> :ets.update_element({topic, queue_id}, [{3, offset}, {4, true}])

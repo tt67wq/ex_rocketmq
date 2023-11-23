@@ -13,27 +13,26 @@ defmodule ExRocketmq.ProcessQueue.Concurrent do
   }
 
   alias ExRocketmq.Models.{
-    MessageExt
+    MessageExt,
+    MessageQueue
   }
 
   def run(
         %State{
-          topic: topic,
-          queue_id: queue_id,
+          mq: mq,
           buff_manager: buff_manager,
           buff: nil
         } = state
       ) do
     # get mq buff
-    {buff, _, _} = BuffManager.get_or_new(buff_manager, topic, queue_id)
+    {buff, _, _} = BuffManager.get_or_new(buff_manager, mq)
     run(%{state | buff: buff})
   end
 
   def run(
         %State{
           buff: buff,
-          topic: topic,
-          queue_id: queue_id,
+          mq: mq,
           buff_manager: buff_manager
         } = state
       ) do
@@ -53,8 +52,7 @@ defmodule ExRocketmq.ProcessQueue.Concurrent do
 
         BuffManager.update_offset(
           buff_manager,
-          topic,
-          queue_id,
+          mq,
           last_offset
         )
 
@@ -70,7 +68,7 @@ defmodule ExRocketmq.ProcessQueue.Concurrent do
          message_exts,
          %State{
            client_id: cid,
-           topic: topic,
+           mq: %MessageQueue{topic: topic},
            consume_batch_size: consume_batch_size,
            group_name: group_name,
            processor: processor,

@@ -57,13 +57,12 @@ defmodule ExRocketmq.Puller.Broadcast do
 
   def run(
         %State{
-          topic: topic,
-          queue_id: queue_id,
+          mq: mq,
           holding_msgs: msgs,
           buff_manager: buff_manager
         } = state
       ) do
-    {buff, _, _} = BuffManager.get_or_new(buff_manager, topic, queue_id)
+    {buff, _, _} = BuffManager.get_or_new(buff_manager, mq)
 
     Util.Buffer.put(buff, msgs)
     |> case do

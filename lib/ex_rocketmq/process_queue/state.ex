@@ -8,13 +8,13 @@ defmodule ExRocketmq.ProcessQueue.State do
   }
 
   alias ExRocketmq.Models.{
-    BrokerData
+    BrokerData,
+    MessageQueue
   }
 
   defstruct client_id: "",
             group_name: "",
-            topic: "",
-            queue_id: 0,
+            mq: nil,
             buff_manager: nil,
             buff: nil,
             broker_data: nil,
@@ -26,8 +26,7 @@ defmodule ExRocketmq.ProcessQueue.State do
   @type t :: %__MODULE__{
           client_id: String.t(),
           group_name: Typespecs.group_name(),
-          topic: Typespecs.topic(),
-          queue_id: non_neg_integer(),
+          mq: MessageQueue.t(),
           buff_manager: Consumer.BuffManager.t(),
           buff: Consumer.Buff.t(),
           broker_data: BrokerData.t(),

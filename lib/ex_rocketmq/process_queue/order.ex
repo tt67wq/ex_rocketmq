@@ -8,26 +8,25 @@ defmodule ExRocketmq.ProcessQueue.Order do
   }
 
   alias ExRocketmq.Models.{
-    MessageExt
+    MessageExt,
+    MessageQueue
   }
 
   def run(
         %State{
-          topic: topic,
-          queue_id: queue_id,
+          mq: mq,
           buff_manager: buff_manager,
           buff: nil
         } = state
       ) do
     # get mq buff
-    {buff, _, _} = BuffManager.get_or_new(buff_manager, topic, queue_id)
+    {buff, _, _} = BuffManager.get_or_new(buff_manager, mq)
     run(%{state | buff: buff})
   end
 
   def run(
         %State{
-          topic: topic,
-          queue_id: queue_id,
+          mq: mq,
           buff_manager: buff_manager,
           buff: buff
         } = state
@@ -48,8 +47,7 @@ defmodule ExRocketmq.ProcessQueue.Order do
 
         BuffManager.update_offset(
           buff_manager,
-          topic,
-          queue_id,
+          mq,
           last_offset
         )
 
@@ -83,7 +81,7 @@ defmodule ExRocketmq.ProcessQueue.Order do
          [msgs | tail],
          %State{
            client_id: cid,
-           topic: topic,
+           mq: %MessageQueue{topic: topic},
            group_name: group_name,
            processor: processor,
            trace_enable: trace_enable,

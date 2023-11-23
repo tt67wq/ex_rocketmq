@@ -6,13 +6,13 @@ defmodule ExRocketmq.Puller.State do
   alias ExRocketmq.Models.{
     BrokerData,
     Subscription,
-    MessageExt
+    MessageExt,
+    MessageQueue
   }
 
   defstruct client_id: "",
             group_name: "",
-            topic: "",
-            queue_id: 0,
+            mq: nil,
             buff_manager: nil,
             broker_data: nil,
             consume_from_where: :last_offset,
@@ -28,8 +28,7 @@ defmodule ExRocketmq.Puller.State do
   @type t :: %__MODULE__{
           client_id: String.t(),
           group_name: Typespecs.group_name(),
-          topic: Typespecs.topic(),
-          queue_id: non_neg_integer(),
+          mq: MessageQueue.t(),
           buff_manager: nil | atom(),
           broker_data: BrokerData.t(),
           consume_from_where: :last_offset | :first_offset | :timestamp,

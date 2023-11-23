@@ -13,7 +13,6 @@ defmodule ExRocketmq.Puller.Locked do
 
   alias ExRocketmq.Models.{
     BrokerData,
-    MessageQueue,
     Lock
   }
 
@@ -22,10 +21,9 @@ defmodule ExRocketmq.Puller.Locked do
   def run(
         %State{
           client_id: cid,
-          topic: topic,
           group_name: group_name,
           broker_data: bd,
-          queue_id: queue_id,
+          mq: mq,
           lock_ttl: ttl
         } = state
       )
@@ -42,13 +40,7 @@ defmodule ExRocketmq.Puller.Locked do
     req = %Lock.Req{
       consumer_group: group_name,
       client_id: cid,
-      mq: [
-        %MessageQueue{
-          topic: topic,
-          broker_name: bd.broker_name,
-          queue_id: queue_id
-        }
-      ]
+      mq: [mq]
     }
 
     Broker.lock_batch_mq(broker, req)
@@ -78,8 +70,7 @@ defmodule ExRocketmq.Puller.Locked do
   def run(
         %State{
           client_id: cid,
-          topic: topic,
-          queue_id: queue_id,
+          mq: mq,
           buff_manager: buff_manager,
           broker_data: bd,
           holding_msgs: [],
@@ -87,7 +78,7 @@ defmodule ExRocketmq.Puller.Locked do
         } = state
       ) do
     now = System.system_time(:millisecond)
-    {buff, commit_offset, commit?} = BuffManager.get_or_new(buff_manager, topic, queue_id)
+    {buff, commit_offset, commit?} = BuffManager.get_or_new(buff_manager, mq)
     req = Common.new_pull_request(state, commit_offset, commit?)
 
     broker =
@@ -125,8 +116,7 @@ defmodule ExRocketmq.Puller.Locked do
 
   def run(
         %State{
-          topic: topic,
-          queue_id: queue_id,
+          mq: mq,
           holding_msgs: msgs,
           buff_manager: buff_manager,
           lock_ttl: ttl,
@@ -139,7 +129,7 @@ defmodule ExRocketmq.Puller.Locked do
       buff
       |> is_nil()
       |> if do
-        {buff, _, _} = BuffManager.get_or_new(buff_manager, topic, queue_id)
+        {buff, _, _} = BuffManager.get_or_new(buff_manager, mq)
         buff
       else
         buff

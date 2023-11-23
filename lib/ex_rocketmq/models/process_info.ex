@@ -32,4 +32,38 @@ defmodule ExRocketmq.Models.ProcessInfo do
           last_pull_timestamp: non_neg_integer(),
           last_consumed_timestamp: non_neg_integer()
         }
+
+  def to_map(%__MODULE__{
+        commit_offset: commit_offset,
+        cached_msg_min_offset: cached_msg_min_offset,
+        cached_msg_max_offset: cached_msg_max_offset,
+        cached_msg_count: cached_msg_count,
+        cached_msg_size_in_mib: cached_msg_size_in_mib,
+        transaction_msg_min_offset: transaction_msg_min_offset,
+        transaction_msg_max_offset: transaction_msg_max_offset,
+        transaction_msg_count: transaction_msg_count,
+        locked: locked,
+        try_unlock_times: try_unlock_times,
+        last_lock_timestamp: last_lock_timestamp,
+        dropped: dropped,
+        last_pull_timestamp: last_pull_timestamp,
+        last_consumed_timestamp: last_consumed_timestamp
+      }) do
+    %{
+      "commitOffset" => commit_offset,
+      "cachedMsgMinOffset" => cached_msg_min_offset,
+      "cachedMsgMaxOffset" => cached_msg_max_offset,
+      "cachedMsgCount" => cached_msg_count,
+      "cachedMsgSizeInMiB" => cached_msg_size_in_mib,
+      "transactionMsgMinOffset" => transaction_msg_min_offset,
+      "transactionMsgMaxOffset" => transaction_msg_max_offset,
+      "transactionMsgCount" => transaction_msg_count,
+      "locked" => locked,
+      "tryUnlockTimes" => try_unlock_times,
+      "lastLockTimestamp" => last_lock_timestamp,
+      "dropped" => dropped,
+      "lastPullTimestamp" => last_pull_timestamp,
+      "lastConsumedTimestamp" => last_consumed_timestamp
+    }
+  end
 end

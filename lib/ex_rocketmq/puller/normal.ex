@@ -35,14 +35,13 @@ defmodule ExRocketmq.Puller.Normal do
   def run(
         %State{
           client_id: cid,
-          topic: topic,
-          queue_id: queue_id,
+          mq: mq,
           buff_manager: buff_manager,
           broker_data: bd,
           holding_msgs: []
         } = state
       ) do
-    {buff, commit_offset, commit?} = BuffManager.get_or_new(buff_manager, topic, queue_id)
+    {buff, commit_offset, commit?} = BuffManager.get_or_new(buff_manager, mq)
     req = Common.new_pull_request(state, commit_offset, commit?)
 
     broker =
@@ -74,8 +73,7 @@ defmodule ExRocketmq.Puller.Normal do
 
   def run(
         %State{
-          topic: topic,
-          queue_id: queue_id,
+          mq: mq,
           holding_msgs: msgs,
           buff_manager: buff_manager,
           buff: buff
@@ -85,7 +83,7 @@ defmodule ExRocketmq.Puller.Normal do
       buff
       |> is_nil()
       |> if do
-        {buff, _, _} = BuffManager.get_or_new(buff_manager, topic, queue_id)
+        {buff, _, _} = BuffManager.get_or_new(buff_manager, mq)
         buff
       else
         buff

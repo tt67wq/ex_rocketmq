@@ -16,7 +16,8 @@ defmodule ExRocketmq.Puller.Common do
     BrokerData,
     PullMsg,
     MessageExt,
-    Subscription
+    Subscription,
+    MessageQueue
   }
 
   require Logger
@@ -31,8 +32,7 @@ defmodule ExRocketmq.Puller.Common do
   def get_next_offset(%State{
         client_id: cid,
         group_name: group_name,
-        topic: topic,
-        queue_id: queue_id,
+        mq: %MessageQueue{topic: topic, queue_id: queue_id},
         broker_data: bd,
         consume_from_where: consume_from_where,
         consume_timestamp: consume_timestamp
@@ -133,8 +133,7 @@ defmodule ExRocketmq.Puller.Common do
         broker,
         %PullMsg.Request{} = req,
         %State{
-          topic: topic,
-          queue_id: queue_id
+          mq: %MessageQueue{topic: topic, queue_id: queue_id}
         }
       ) do
     Broker.pull_message(broker, req)
@@ -178,8 +177,7 @@ defmodule ExRocketmq.Puller.Common do
   def new_pull_request(
         %State{
           group_name: group_name,
-          topic: topic,
-          queue_id: queue_id,
+          mq: %MessageQueue{topic: topic, queue_id: queue_id},
           next_offset: next_offset,
           pull_batch_size: pull_batch_size,
           post_subscription_when_pull: post_subscription_when_pull,
