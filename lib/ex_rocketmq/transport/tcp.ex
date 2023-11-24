@@ -190,8 +190,7 @@ defmodule ExRocketmq.Transport.Tcp do
   @impl Connection
   def connect(
         :backoff,
-        %{sock: nil, host: host, port: port, retry: 3} =
-          s
+        %{sock: nil, host: host, port: port, retry: 3} = s
       ) do
     Logger.error("retrying to connect to #{host}:#{port} after 3 attempts")
     {:stop, :connect_failed, %{s | sock: nil}}
@@ -206,8 +205,7 @@ defmodule ExRocketmq.Transport.Tcp do
           timeout: timeout,
           sockopts: sockopts,
           retry: retry
-        } =
-          s
+        } = s
       ) do
     Logger.info("retrying to connect to #{host}:#{port} after #{retry} attempts")
 

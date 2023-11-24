@@ -8,13 +8,10 @@ defmodule ProducerTest do
   alias ExRocketmq.Models.{Message}
 
   setup_all do
-    %{
-      "host" => host,
-      "port" => port,
-      "topic" => topic,
-      "group" => group
-    } =
-      File.read!("./tmp/producer.json") |> Jason.decode!()
+    configs = Application.get_all_env(:ex_rocketmq)
+
+    {host, port} = configs[:namesrvs]
+    %{group: group, topic: topic} = configs[:consumer]
 
     namesrvs_opts = [
       remotes: [
@@ -26,7 +23,8 @@ defmodule ProducerTest do
 
     opts = [
       group_name: group,
-      namesrvs: namesrvs
+      namesrvs: namesrvs,
+      transaction_listener: MockTransaction.new()
     ]
 
     pid = start_supervised!({Producer, opts})
@@ -54,15 +52,15 @@ defmodule ProducerTest do
   end
 
   test "send_transaction_msg", %{producer: producer, topic: topic} do
-    assert {:ok, _} =
+    assert {:ok, _, _} =
              Producer.send_transaction_msg(
                producer,
                %Message{topic: topic, body: "Hello from elixir transaction"}
              )
-             |> Debug.debug()
+             |> Debug.stacktrace()
 
     # sleep 10 seconds to wait for broker notify
-    Process.sleep(30_000)
+    Process.sleep(5_000)
   end
 
   # test "send_many_times", %{producer: producer, topic: topic} do

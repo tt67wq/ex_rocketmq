@@ -5,12 +5,10 @@ defmodule NamesrvsTest do
   alias ExRocketmq.{Namesrvs, Transport}
 
   setup_all do
-    %{
-      "host" => host,
-      "port" => port,
-      "topic" => topic
-    } =
-      File.read!("./tmp/test.json") |> Jason.decode!()
+    configs = Application.get_all_env(:ex_rocketmq)
+
+    {host, port} = configs[:namesrvs]
+    %{group: _group, topic: topic} = configs[:consumer]
 
     namesrvs_opts = [
       remotes: [
