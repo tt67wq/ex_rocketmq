@@ -34,4 +34,18 @@ defmodule BufferTest do
       assert Buffer.size(:my_queue) == 3
     end
   end
+
+  describe "first last/2" do
+    test "returns the first last of the buffer queue" do
+      assert Buffer.put(:my_queue, [1, 2, 3]) == :ok
+      assert Buffer.last(:my_queue) == 3
+      assert Buffer.first(:my_queue) == 1
+      assert Buffer.put(:my_queue, [4, 5, 6]) == :ok
+      assert Buffer.last(:my_queue) == 6
+      assert Buffer.first(:my_queue) == 1
+      Buffer.take(:my_queue)
+      assert Buffer.last(:my_queue) == nil
+      assert Buffer.first(:my_queue) == nil
+    end
+  end
 end
