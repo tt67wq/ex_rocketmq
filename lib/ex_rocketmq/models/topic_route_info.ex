@@ -107,28 +107,41 @@ defmodule ExRocketmq.Models.QueueData do
           broker_name: String.t(),
           perm: integer(),
           read_queue_nums: integer(),
-          topic_syn_flag: integer(),
+          topic_sys_flag: integer(),
           write_queue_nums: integer()
         }
 
-  defstruct broker_name: "", perm: 0, read_queue_nums: 0, topic_syn_flag: 0, write_queue_nums: 0
+  defstruct broker_name: "", perm: 0, read_queue_nums: 0, topic_sys_flag: 0, write_queue_nums: 0
 
   # @perm_priority Bitwise.bsl(1, 3)
   @perm_read Bitwise.bsl(1, 2)
   @perm_write Bitwise.bsl(1, 1)
 
+  def from_map(
+        %{
+          "topicSynFlag" => topic_sys_flag
+        } = map
+      ) do
+    # topicSynFlag is a spell mistake in rocketmq, so we need to fix it for rocketmq 4.9.x
+    # see https://github.com/tt67wq/ex_rocketmq/issues/4
+    map
+    |> Map.drop(["topicSynFlag"])
+    |> Map.put("topicSysFlag", topic_sys_flag)
+    |> from_map()
+  end
+
   def from_map(%{
         "brokerName" => broker_name,
         "perm" => perm,
         "readQueueNums" => read_queue_nums,
-        "topicSynFlag" => topic_syn_flag,
+        "topicSysFlag" => topic_sys_flag,
         "writeQueueNums" => write_queue_nums
       }) do
     %__MODULE__{
       broker_name: broker_name,
       perm: perm,
       read_queue_nums: read_queue_nums,
-      topic_syn_flag: topic_syn_flag,
+      topic_sys_flag: topic_sys_flag,
       write_queue_nums: write_queue_nums
     }
   end
