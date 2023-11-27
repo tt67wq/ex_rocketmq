@@ -17,9 +17,9 @@ defmodule ExRocketmq.Puller.Broadcast do
     run(%{state | next_offset: offset})
   end
 
-  def run(%State{client_id: cid, mq: mq, broker_data: bd, holding_msgs: [], round: round, rt: rt} = state) do
+  def run(%State{client_id: cid, mq: mq, broker_data: bd, holding_msgs: [], pull_cnt: pull_cnt, rt: rt} = state) do
     # report
-    Stats.puller_report(:"Stats.#{cid}", mq, false, 0, round, rt)
+    Stats.puller_report(:"Stats.#{cid}", mq, false, 0, pull_cnt, rt)
 
     # no need to commit offset for broadcast puller
     req = Common.new_pull_request(state, 0, false)
@@ -42,10 +42,16 @@ defmodule ExRocketmq.Puller.Broadcast do
       {[], _, cost} ->
         # pull failed or no new msgs, suspend for a while
         Process.sleep(5000)
-        run(%State{state | round: round + 1, rt: rt + cost})
+        run(%State{state | rt: rt + cost})
 
       {msgs, next_offset, cost} ->
-        run(%State{state | holding_msgs: msgs, next_offset: next_offset, round: round + 1, rt: rt + cost})
+        run(%State{
+          state
+          | holding_msgs: msgs,
+            next_offset: next_offset,
+            pull_cnt: pull_cnt + Enum.count(msgs),
+            rt: rt + cost
+        })
     end
   end
 

@@ -2,7 +2,7 @@ defmodule ExRocketmq.Transport do
   @moduledoc """
   The transport layer of the rocketmq protocol, default implementation is ExRocketmq.Transport.TCP
   """
-  alias ExRocketmq.{Typespecs}
+  alias ExRocketmq.Typespecs
 
   @type t :: struct()
   @type error_t :: {:error, :timeout | any()}
@@ -15,10 +15,16 @@ defmodule ExRocketmq.Transport do
   @callback recv(transport :: t()) ::
               {:ok, binary()} | error_t()
 
-  @callback info(t()) :: {:ok, map()} | error_t()
+  @callback info(t()) ::
+              {:ok,
+               %{
+                 pid: pid(),
+                 host: String.t(),
+                 port: non_neg_integer()
+               }}
+              | error_t()
 
-  defp delegate(%module{} = m, func, args),
-    do: apply(module, func, [m | args])
+  defp delegate(%module{} = m, func, args), do: apply(module, func, [m | args])
 
   @doc """
   start transport module
@@ -47,6 +53,13 @@ defmodule ExRocketmq.Transport do
   @doc """
   get the info of transport
   """
-  @spec info(t()) :: {:ok, map()} | error_t()
+  @spec info(t()) ::
+          {:ok,
+           %{
+             pid: pid(),
+             host: String.t(),
+             port: non_neg_integer()
+           }}
+          | error_t()
   def info(transport), do: delegate(transport, :info, [])
 end

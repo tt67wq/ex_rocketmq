@@ -1,22 +1,23 @@
+# {:ex_rocketmq, github: "tt67wq/ex_rocketmq", branch: "master"}
+alias ExRocketmq.Consumer
+alias ExRocketmq.Models.MsgSelector
+alias ExRocketmq.Namesrvs
+alias ExRocketmq.Transport
+
 Mix.install([
-  # {:ex_rocketmq, github: "tt67wq/ex_rocketmq", branch: "master"}
   {:ex_rocketmq, path: "../ex_rocketmq"}
 ])
-
-alias ExRocketmq.{Consumer, Namesrvs, Transport, Models.MsgSelector}
 
 defmodule MyProcessor do
   @moduledoc """
   A mock processor for testing.
   """
 
-  alias ExRocketmq.{
-    Consumer.Processor,
-    Models.MessageExt,
-    Typespecs
-  }
-
   @behaviour Processor
+
+  alias ExRocketmq.Consumer.Processor
+  alias ExRocketmq.Models.MessageExt
+  alias ExRocketmq.Typespecs
 
   defstruct []
 
@@ -28,11 +29,7 @@ defmodule MyProcessor do
   @spec process(t(), Typespecs.topic(), [MessageExt.t()]) ::
           Processor.consume_result() | {:error, term()}
   def process(_, topic, msgs) do
-    msgs
-    |> Enum.each(fn msg ->
-      IO.puts("[#{topic}]:#{msg.queue_offset}:#{msg.msg_id} ==> #{msg.message.body}")
-    end)
-
+    Enum.each(msgs, fn msg -> IO.puts("[#{topic}]:#{msg.queue_offset}:#{msg.msg_id} ==> #{msg.message.body}") end)
     :success
     # {:retry_later, msgs |> Enum.map(fn msg -> {msg.msg_id, 2} end) |> Map.new()}
   end

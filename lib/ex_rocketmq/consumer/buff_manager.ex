@@ -18,13 +18,8 @@ defmodule ExRocketmq.Consumer.BuffManager do
 
   use Agent
 
-  alias ExRocketmq.{
-    Util
-  }
-
-  alias ExRocketmq.Models.{
-    MessageQueue
-  }
+  alias ExRocketmq.Models.MessageQueue
+  alias ExRocketmq.Util
 
   defstruct []
 
@@ -39,6 +34,21 @@ defmodule ExRocketmq.Consumer.BuffManager do
   defp supervisor(name), do: :"ds_#{name}"
   defp table(name), do: :"buff_store_#{name}"
 
+  @spec get(name :: atom(), MessageQueue.t()) ::
+          {buff :: atom(), offset :: non_neg_integer(), commit? :: boolean()} | nil
+  def get(name, %MessageQueue{topic: topic, queue_id: queue_id}) do
+    name
+    |> table()
+    |> :ets.lookup({topic, queue_id})
+    |> case do
+      [] ->
+        nil
+
+      [{_, buff, offset, commit?}] ->
+        {buff, offset, commit?}
+    end
+  end
+
   @spec get_or_new(name :: atom(), MessageQueue.t()) ::
           {buff :: atom(), offset :: non_neg_integer(), commit? :: boolean()}
   def get_or_new(name, %MessageQueue{topic: topic, queue_id: queue_id}) do
@@ -50,9 +60,7 @@ defmodule ExRocketmq.Consumer.BuffManager do
       [] ->
         name
         |> supervisor()
-        |> DynamicSupervisor.start_child(
-          {Util.Buffer, [name: :"#{topic}_#{queue_id}", size: 4096]}
-        )
+        |> DynamicSupervisor.start_child({Util.Buffer, [name: :"#{topic}_#{queue_id}", size: 4096]})
 
         :ets.insert(tb, {{topic, queue_id}, :"#{topic}_#{queue_id}", 0, false})
         {:"#{topic}_#{queue_id}", 0, false}

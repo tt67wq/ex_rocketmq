@@ -58,13 +58,13 @@ defmodule ExRocketmq.Puller.Locked do
           broker_data: bd,
           holding_msgs: [],
           lock_ttl: ttl,
-          round: round,
+          pull_cnt: pull_cnt,
           rt: rt,
           last_lock_timestamp: last_lock_timestamp
         } = state
       ) do
     # report
-    Stats.puller_report(:"Stats.#{cid}", mq, true, last_lock_timestamp, round, rt)
+    Stats.puller_report(:"Stats.#{cid}", mq, true, last_lock_timestamp, pull_cnt, rt)
 
     now = System.system_time(:millisecond)
     {buff, commit_offset, commit?} = BuffManager.get_or_new(buff_manager, mq)
@@ -88,7 +88,7 @@ defmodule ExRocketmq.Puller.Locked do
       {[], _, cost} ->
         # pull failed or no new msgs, suspend for a while
         Process.sleep(5000)
-        run(%State{state | lock_ttl: new_ttl(ttl, now), round: round + 1, rt: rt + cost})
+        run(%State{state | lock_ttl: new_ttl(ttl, now), rt: rt + cost})
 
       {msgs, next_offset, cost} ->
         run(%State{
@@ -97,7 +97,7 @@ defmodule ExRocketmq.Puller.Locked do
             next_offset: next_offset,
             lock_ttl: new_ttl(ttl, now),
             buff: buff,
-            round: round + 1,
+            pull_cnt: pull_cnt + Enum.count(msgs),
             rt: rt + cost
         })
     end

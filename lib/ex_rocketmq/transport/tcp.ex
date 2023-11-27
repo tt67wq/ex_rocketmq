@@ -3,13 +3,14 @@ defmodule ExRocketmq.Transport.Tcp do
   Implement the transport layer of the rocketmq protocol via tcp
   """
 
-  alias ExRocketmq.{Transport, Typespecs}
+  @behaviour ExRocketmq.Transport
 
   use Connection
 
-  require Logger
+  alias ExRocketmq.Transport
+  alias ExRocketmq.Typespecs
 
-  @behaviour Transport
+  require Logger
 
   @tcp_opts_schema [
     host: [
@@ -83,8 +84,7 @@ defmodule ExRocketmq.Transport.Tcp do
   @spec new(tcp_opts_schema_t()) :: t()
   def new(opts) do
     opts =
-      opts
-      |> NimbleOptions.validate!(@tcp_opts_schema)
+      NimbleOptions.validate!(opts, @tcp_opts_schema)
 
     struct(__MODULE__, opts)
   end
@@ -127,11 +127,7 @@ defmodule ExRocketmq.Transport.Tcp do
   """
   @spec info(t()) :: {:ok, map()}
   @impl Transport
-  def info(%__MODULE__{
-        pid: pid,
-        host: host,
-        port: port
-      }) do
+  def info(%__MODULE__{pid: pid, host: host, port: port}) do
     {:ok,
      %{
        pid: pid,
@@ -145,15 +141,7 @@ defmodule ExRocketmq.Transport.Tcp do
   """
   @spec start(t()) :: {:ok, t()}
   @impl Transport
-  def start(
-        %{
-          host: host,
-          port: port,
-          timeout: timeout,
-          sockopts: sockopts,
-          opts: opts
-        } = transport
-      ) do
+  def start(%{host: host, port: port, timeout: timeout, sockopts: sockopts, opts: opts} = transport) do
     {:ok, pid} = Connection.start_link(__MODULE__, {host, port, timeout, sockopts}, opts)
     {:ok, %{transport | pid: pid}}
   end
@@ -188,30 +176,16 @@ defmodule ExRocketmq.Transport.Tcp do
   end
 
   @impl Connection
-  def connect(
-        :backoff,
-        %{sock: nil, host: host, port: port, retry: 3} =
-          s
-      ) do
+  def connect(:backoff, %{sock: nil, host: host, port: port, retry: 3} = s) do
     Logger.error("retrying to connect to #{host}:#{port} after 3 attempts")
     {:stop, :connect_failed, %{s | sock: nil}}
   end
 
-  def connect(
-        :backoff,
-        %{
-          sock: nil,
-          host: host,
-          port: port,
-          timeout: timeout,
-          sockopts: sockopts,
-          retry: retry
-        } =
-          s
-      ) do
+  def connect(:backoff, %{sock: nil, host: host, port: port, timeout: timeout, sockopts: sockopts, retry: retry} = s) do
     Logger.info("retrying to connect to #{host}:#{port} after #{retry} attempts")
 
-    do_connect(host, port, sockopts, timeout)
+    host
+    |> do_connect(port, sockopts, timeout)
     |> case do
       {:ok, sock} ->
         {:ok, %{s | sock: sock, retry: 0}}
@@ -223,11 +197,9 @@ defmodule ExRocketmq.Transport.Tcp do
     end
   end
 
-  def connect(
-        _,
-        %{sock: nil, host: host, port: port, timeout: timeout, sockopts: sockopts} = s
-      ) do
-    do_connect(host, port, sockopts, timeout)
+  def connect(_, %{sock: nil, host: host, port: port, timeout: timeout, sockopts: sockopts} = s) do
+    host
+    |> do_connect(port, sockopts, timeout)
     |> case do
       {:ok, sock} ->
         {:ok, %{s | sock: sock}}
@@ -268,7 +240,11 @@ defmodule ExRocketmq.Transport.Tcp do
   end
 
   @impl Connection
-  def handle_call(_, _, %{sock: nil} = s) do
+  def handle_call(:host, _, %{host: host} = s) do
+    {:reply, {:ok, host}, s}
+  end
+
+  def handle_call({:recv, _}, _, %{sock: nil} = s) do
     {:reply, {:error, :closed}, s}
   end
 

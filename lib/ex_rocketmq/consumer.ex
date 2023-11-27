@@ -67,10 +67,53 @@ defmodule ExRocketmq.Consumer do
 
   """
 
+  # consume_info_map stores the consume info of each topic
+  # consume info contains:
+  #   1. subscription
+  #   2. broker_datas
+  #   3. mqs
+  #   4. consume task for assigned queue
+  use GenServer
+
+  alias ExRocketmq.Broker
+  alias ExRocketmq.Consumer.BalanceStrategy
+  alias ExRocketmq.Consumer.BuffManager
+  alias ExRocketmq.Models.BrokerData
+  alias ExRocketmq.Models.ConsumeMessageDirectly
+  alias ExRocketmq.Models.ConsumeMessageDirectlyResult
+  alias ExRocketmq.Models.ConsumerData
+  alias ExRocketmq.Models.Heartbeat
+  alias ExRocketmq.Models.MessageExt
+  alias ExRocketmq.Models.MessageQueue
+  alias ExRocketmq.Models.MsgSelector
+  alias ExRocketmq.Models.QueueData
+  alias ExRocketmq.Models.RunningInfo
+  alias ExRocketmq.Models.Subscription
+  alias ExRocketmq.Namesrvs
+  alias ExRocketmq.ProcessQueue
+  alias ExRocketmq.Protocol.ConsumeResult
+  alias ExRocketmq.Protocol.PullStatus
+  alias ExRocketmq.Protocol.Request
+  alias ExRocketmq.Protocol.Response
+  alias ExRocketmq.Puller
+  alias ExRocketmq.Remote.Packet
+  alias ExRocketmq.Stats
+  alias ExRocketmq.Tracer
+  alias ExRocketmq.Typespecs
+  alias ExRocketmq.Util
+
+  require ConsumeResult
+  require Logger
+  require Packet
+  require PullStatus
+  require Request
+  require Response
+
   defmodule State do
     @moduledoc false
 
-    alias ExRocketmq.{Typespecs, Models}
+    alias ExRocketmq.Models
+    alias ExRocketmq.Typespecs
 
     @type puller :: pid()
     @type processor :: pid()
@@ -78,12 +121,6 @@ defmodule ExRocketmq.Consumer do
             client_id: String.t(),
             namesrvs: pid() | atom(),
             processor: ExRocketmq.Consumer.Processor.t(),
-            # consume_info_map stores the consume info of each topic
-            # consume info contains:
-            #   1. subscription
-            #   2. broker_datas
-            #   3. mqs
-            #   4. consume task for assigned queue
             consume_info_map: %{
               Typespecs.topic() => {
                 Models.Subscription.t(),
@@ -94,6 +131,7 @@ defmodule ExRocketmq.Consumer do
             },
             supervisor: pid() | atom(),
             trace_enable: boolean(),
+            start_timestamp: non_neg_integer(),
             consume_opts: %{
               group_name: Typespecs.group_name(),
               retry_topic: Typespecs.topic(),
@@ -116,6 +154,7 @@ defmodule ExRocketmq.Consumer do
               processor: nil,
               trace_enable: false,
               supervisor: nil,
+              start_timestamp: System.system_time(:millisecond),
               consume_opts: %{
                 group_name: "",
                 retry_topic: "",
@@ -131,43 +170,6 @@ defmodule ExRocketmq.Consumer do
                 max_reconsume_times: 16
               }
   end
-
-  use GenServer
-
-  alias ExRocketmq.{
-    Util,
-    Typespecs,
-    Namesrvs,
-    Broker,
-    Consumer.BalanceStrategy,
-    Remote.Packet,
-    Tracer,
-    Puller,
-    ProcessQueue,
-    Consumer.BuffManager
-  }
-
-  alias ExRocketmq.Protocol.{ConsumeResult, Request, PullStatus, Response}
-
-  alias ExRocketmq.Models.{
-    Subscription,
-    MsgSelector,
-    QueueData,
-    Heartbeat,
-    ConsumerData,
-    BrokerData,
-    MessageQueue,
-    ConsumeMessageDirectly,
-    ConsumeMessageDirectlyResult,
-    MessageExt
-  }
-
-  require Logger
-  require Request
-  require Packet
-  require PullStatus
-  require ConsumeResult
-  require Response
 
   @consumer_opts_schema [
     consumer_group: [
@@ -192,8 +194,7 @@ defmodule ExRocketmq.Consumer do
     ],
     subscriptions: [
       type: {:map, :string, :any},
-      doc:
-        "The subscriptions of the consumer, such as %{\"SomeTopic\" => %ExRocketmq.Models.MsgSelector{}}",
+      doc: "The subscriptions of the consumer, such as %{\"SomeTopic\" => %ExRocketmq.Models.MsgSelector{}}",
       default: %{}
     ],
     consume_orderly: [
@@ -256,6 +257,7 @@ defmodule ExRocketmq.Consumer do
   # request const
   @req_notify_consumer_ids_changed Request.req_notify_consumer_ids_changed()
   @req_consume_message_directly Request.req_consume_message_directly()
+  @req_get_consumer_running_info Request.req_get_consumer_running_info()
 
   # consume result
   @consume_success ConsumeResult.success()
@@ -282,8 +284,7 @@ defmodule ExRocketmq.Consumer do
   @spec start_link(consumer_opts_schema_t()) :: Typespecs.on_start()
   def start_link(opts) do
     opts =
-      opts
-      |> NimbleOptions.validate!(@consumer_opts_schema)
+      NimbleOptions.validate!(opts, @consumer_opts_schema)
 
     {opts, init} = Keyword.pop(opts, :opts)
     GenServer.start_link(__MODULE__, init, opts)
@@ -332,8 +333,7 @@ defmodule ExRocketmq.Consumer do
     cid = Util.ClientId.get("Consumer")
     # prepare subscriptions
     cmap =
-      opts[:subscriptions]
-      |> Enum.into(%{}, fn {topic, msg_selector} ->
+      Map.new(opts[:subscriptions], fn {topic, msg_selector} ->
         {topic, {message_selector_to_subscription(topic, msg_selector), [], [], %{}}}
       end)
 
@@ -371,11 +371,7 @@ defmodule ExRocketmq.Consumer do
      }, {:continue, :on_start}}
   end
 
-  def terminate(reason, %State{
-        client_id: cid,
-        trace_enable: trace_enable,
-        supervisor: supervisor
-      }) do
+  def terminate(reason, %State{client_id: cid, trace_enable: trace_enable, supervisor: supervisor}) do
     Logger.info("consumer terminate, reason: #{inspect(reason)}")
 
     # stop broker
@@ -407,13 +403,7 @@ defmodule ExRocketmq.Consumer do
   # cluster consumer, we have to register retry topic to consume retry msgs
   def handle_continue(
         :on_start,
-        %State{
-          consume_info_map: cmap,
-          consume_opts: %{
-            model: :cluster,
-            retry_topic: topic
-          }
-        } = state
+        %State{consume_info_map: cmap, consume_opts: %{model: :cluster, retry_topic: topic}} = state
       ) do
     sub = %Subscription{
       class_filter_mode: false,
@@ -439,13 +429,7 @@ defmodule ExRocketmq.Consumer do
   def handle_call(
         {:subscribe, topic, msg_selector},
         _from,
-        %State{
-          consume_opts: %{
-            namespace: namespace
-          },
-          namesrvs: namesrvs,
-          consume_info_map: cmap
-        } = state
+        %State{consume_opts: %{namespace: namespace}, namesrvs: namesrvs, consume_info_map: cmap} = state
       ) do
     topic = with_namespace(topic, namespace)
 
@@ -457,7 +441,8 @@ defmodule ExRocketmq.Consumer do
       :error ->
         sub = message_selector_to_subscription(topic, msg_selector)
 
-        fetch_consume_info(namesrvs, topic)
+        namesrvs
+        |> fetch_consume_info(topic)
         |> case do
           {:ok, {broker_datas, mqs}} ->
             state = %State{
@@ -480,18 +465,13 @@ defmodule ExRocketmq.Consumer do
   def handle_call(
         {:unsubscribe, topic},
         _from,
-        %State{
-          client_id: cid,
-          consume_opts: %{
-            namespace: namespace
-          },
-          consume_info_map: cmap
-        } = state
+        %State{client_id: cid, consume_opts: %{namespace: namespace}, consume_info_map: cmap} = state
       ) do
     topic = with_namespace(topic, namespace)
 
     {ret, cmap} =
-      Map.pop(cmap, topic)
+      cmap
+      |> Map.pop(topic)
       |> case do
         {nil, cmap} ->
           {{:error, "topic #{topic} has never been subscribed"}, cmap}
@@ -510,19 +490,13 @@ defmodule ExRocketmq.Consumer do
     {:reply, ret, %State{state | consume_info_map: cmap}}
   end
 
-  def handle_info(
-        :update_route_info,
-        %State{
-          client_id: cid,
-          namesrvs: namesrvs,
-          consume_info_map: cmap
-        } = state
-      ) do
+  def handle_info(:update_route_info, %State{client_id: cid, namesrvs: namesrvs, consume_info_map: cmap} = state) do
     cmap =
       cmap
       |> Map.to_list()
       |> Enum.reduce_while(%{}, fn {topic, {sub, _, _, consume_tasks} = old}, acc ->
-        fetch_consume_info(namesrvs, topic)
+        namesrvs
+        |> fetch_consume_info(topic)
         |> case do
           {:ok, {broker_datas, mqs}} ->
             Logger.debug("fetch consume info for topic: #{topic}, mqs: #{inspect(mqs)}")
@@ -543,10 +517,7 @@ defmodule ExRocketmq.Consumer do
   end
 
   # send heartbeat every 30s
-  def handle_info(
-        :heartbeat,
-        state
-      ) do
+  def handle_info(:heartbeat, state) do
     do_heartbeat(state)
     Process.send_after(self(), :heartbeat, 30_000)
 
@@ -559,10 +530,7 @@ defmodule ExRocketmq.Consumer do
     {:noreply, state}
   end
 
-  def handle_info(
-        {:notify, {pkt, broker_pid}},
-        %State{} = state
-      ) do
+  def handle_info({:notify, {pkt, broker_pid}}, %State{} = state) do
     Logger.warning("consumer receive notify: #{inspect(pkt)}")
 
     case Packet.packet(pkt, :code) do
@@ -571,6 +539,10 @@ defmodule ExRocketmq.Consumer do
 
       @req_consume_message_directly ->
         consume_message_directly(pkt, broker_pid, state)
+        {:noreply, state}
+
+      @req_get_consumer_running_info ->
+        send_running_info(pkt, broker_pid, state)
         {:noreply, state}
 
       other_code ->
@@ -597,7 +569,8 @@ defmodule ExRocketmq.Consumer do
   @spec fetch_consume_info(pid() | atom(), Typespecs.topic()) ::
           {:ok, {[BrokerData.t()], [MessageQueue.t()]}} | Typespecs.error_t()
   defp fetch_consume_info(namesrvs, topic) do
-    Namesrvs.query_topic_route_info(namesrvs, topic)
+    namesrvs
+    |> Namesrvs.query_topic_route_info(topic)
     |> case do
       {:ok, %{broker_datas: broker_datas, queue_datas: queue_datas}} ->
         mqs =
@@ -620,15 +593,7 @@ defmodule ExRocketmq.Consumer do
   defp consume_from_where_str(_), do: "UNKNOWN"
 
   @spec do_balance(State.t()) :: State.t()
-  defp do_balance(
-         %State{
-           client_id: cid,
-           consume_info_map: consume_info_map,
-           consume_opts: %{
-             model: :broadcast
-           }
-         } = state
-       ) do
+  defp do_balance(%State{client_id: cid, consume_info_map: consume_info_map, consume_opts: %{model: :broadcast}} = state) do
     # For broadcast-type consumers, rebalancing does not require allocating messages from message queues.
     # It simply needs to perform the consumption tasks for all message queues.
     consume_info_map
@@ -637,8 +602,7 @@ defmodule ExRocketmq.Consumer do
       %{},
       fn {topic, {sub, broker_datas, mqs, consume_tasks}}, acc ->
         to_stop =
-          consume_tasks
-          |> Map.reject(fn {mq, _} -> Enum.member?(mqs, mq) end)
+          Map.reject(consume_tasks, fn {mq, _} -> Enum.member?(mqs, mq) end)
 
         # terminate consume task
         Enum.each(to_stop, fn {mq, {pull_pid, process_pid}} ->
@@ -649,10 +613,9 @@ defmodule ExRocketmq.Consumer do
         new_tasks =
           mqs
           |> Enum.reject(fn mq -> Map.has_key?(consume_tasks, mq) end)
-          |> Enum.into(%{}, fn mq ->
+          |> Map.new(fn mq ->
             bd =
-              broker_datas
-              |> Enum.find(fn bd -> bd.broker_name == mq.broker_name end)
+              Enum.find(broker_datas, fn bd -> bd.broker_name == mq.broker_name end)
 
             {mq, new_consume_task(cid, mq, bd, sub, state)}
           end)
@@ -674,11 +637,7 @@ defmodule ExRocketmq.Consumer do
          %State{
            client_id: cid,
            consume_info_map: consume_info_map,
-           consume_opts: %{
-             group_name: group_name,
-             model: :cluster,
-             balance_strategy: strategy
-           }
+           consume_opts: %{group_name: group_name, model: :cluster, balance_strategy: strategy}
          } = state
        ) do
     # For cluster-type consumers, each consumer needs to evenly distribute all messages
@@ -691,9 +650,7 @@ defmodule ExRocketmq.Consumer do
     |> Enum.reduce_while(
       %{},
       fn {topic, {sub, broker_datas, mqs, consume_tasks} = old}, acc ->
-        Logger.debug(
-          "rebalance topic: #{topic}, broker_datas: #{inspect(broker_datas)}, mqs: #{inspect(mqs)}"
-        )
+        Logger.debug("rebalance topic: #{topic}, broker_datas: #{inspect(broker_datas)}, mqs: #{inspect(mqs)}")
 
         bd = Enum.random(broker_datas)
 
@@ -712,8 +669,7 @@ defmodule ExRocketmq.Consumer do
 
           # to stop consume task: in consume_tasks but not in allocated_mqs
           to_stop =
-            consume_tasks
-            |> Map.reject(fn {mq, _} -> Enum.member?(allocated_mqs, mq) end)
+            Map.reject(consume_tasks, fn {mq, _} -> Enum.member?(allocated_mqs, mq) end)
 
           # terminate consume task
           Enum.each(to_stop, fn {mq, {pull_pid, process_pid}} ->
@@ -724,10 +680,9 @@ defmodule ExRocketmq.Consumer do
           new_tasks =
             allocated_mqs
             |> Enum.reject(fn mq -> Map.has_key?(consume_tasks, mq) end)
-            |> Enum.into(%{}, fn mq ->
+            |> Map.new(fn mq ->
               bd =
-                broker_datas
-                |> Enum.find(fn bd -> bd.broker_name == mq.broker_name end)
+                Enum.find(broker_datas, fn bd -> bd.broker_name == mq.broker_name end)
 
               {mq, new_consume_task(cid, mq, bd, sub, state)}
             end)
@@ -762,23 +717,17 @@ defmodule ExRocketmq.Consumer do
           State.t()
         ) :: {:ok, pid()}
 
-  defp new_pull_task(
-         task_supervisor,
-         mq,
-         bd,
-         sub,
-         %State{
-           client_id: cid,
-           consume_opts: %{
-             group_name: group_name,
-             model: :broadcast,
-             consume_from_where: cfw,
-             consume_timestamp: consume_timestamp,
-             post_subscription_when_pull: post_subscription_when_pull,
-             pull_batch_size: pull_batch_size
-           }
+  defp new_pull_task(task_supervisor, mq, bd, sub, %State{
+         client_id: cid,
+         consume_opts: %{
+           group_name: group_name,
+           model: :broadcast,
+           consume_from_where: cfw,
+           consume_timestamp: consume_timestamp,
+           post_subscription_when_pull: post_subscription_when_pull,
+           pull_batch_size: pull_batch_size
          }
-       ) do
+       }) do
     Task.Supervisor.start_child(
       task_supervisor,
       fn ->
@@ -799,24 +748,18 @@ defmodule ExRocketmq.Consumer do
     )
   end
 
-  defp new_pull_task(
-         task_supervisor,
-         mq,
-         bd,
-         sub,
-         %State{
-           client_id: cid,
-           consume_opts: %{
-             group_name: group_name,
-             model: :cluster,
-             consume_from_where: cfw,
-             consume_timestamp: consume_timestamp,
-             consume_orderly: consume_orderly,
-             post_subscription_when_pull: post_subscription_when_pull,
-             pull_batch_size: pull_batch_size
-           }
+  defp new_pull_task(task_supervisor, mq, bd, sub, %State{
+         client_id: cid,
+         consume_opts: %{
+           group_name: group_name,
+           model: :cluster,
+           consume_from_where: cfw,
+           consume_timestamp: consume_timestamp,
+           consume_orderly: consume_orderly,
+           post_subscription_when_pull: post_subscription_when_pull,
+           pull_batch_size: pull_batch_size
          }
-       ) do
+       }) do
     puller =
       if consume_orderly do
         Puller.Locked
@@ -853,20 +796,12 @@ defmodule ExRocketmq.Consumer do
           State.t()
         ) :: {:ok, pid()}
 
-  defp new_process_task(
-         task_supervisor,
-         mq,
-         broker_data,
-         %State{
-           client_id: cid,
-           processor: processor,
-           trace_enable: trace_enable,
-           consume_opts: %{
-             group_name: group_name,
-             consume_orderly: consume_orderly
-           }
-         }
-       ) do
+  defp new_process_task(task_supervisor, mq, broker_data, %State{
+         client_id: cid,
+         processor: processor,
+         trace_enable: trace_enable,
+         consume_opts: %{group_name: group_name, consume_orderly: consume_orderly}
+       }) do
     process_module =
       if consume_orderly do
         ProcessQueue.Order
@@ -897,11 +832,7 @@ defmodule ExRocketmq.Consumer do
   defp do_heartbeat(%State{
          client_id: cid,
          consume_info_map: cmap,
-         consume_opts: %{
-           model: model,
-           group_name: group_name,
-           consume_from_where: cfw
-         }
+         consume_opts: %{model: model, group_name: group_name, consume_from_where: cfw}
        }) do
     heartbeat_data = %Heartbeat{
       client_id: cid,
@@ -919,10 +850,12 @@ defmodule ExRocketmq.Consumer do
     }
 
     # send heartbeat to all brokers
-    :"DynamicSupervisor.#{cid}"
+    "DynamicSupervisor.#{cid}"
+    |> :erlang.binary_to_atom(:utf8)
     |> Util.SupervisorHelper.all_pids_under_supervisor()
     |> Task.async_stream(fn pid ->
-      Broker.heartbeat(pid, heartbeat_data)
+      pid
+      |> Broker.heartbeat(heartbeat_data)
       |> case do
         :ok ->
           :ok
@@ -975,11 +908,7 @@ defmodule ExRocketmq.Consumer do
     |> Stream.run()
   end
 
-  defp consume_message_directly(pkt, broker_pid, %State{
-         client_id: cid,
-         trace_enable: trace_enable,
-         processor: processor
-       }) do
+  defp consume_message_directly(pkt, broker_pid, %State{client_id: cid, trace_enable: trace_enable, processor: processor}) do
     req =
       pkt
       |> Packet.packet(:ext_fields)
@@ -997,13 +926,11 @@ defmodule ExRocketmq.Consumer do
       tracer =
         if trace_enable do
           :"Tracer.#{cid}"
-        else
-          nil
         end
 
       ret =
-        ProcessQueue.Common.process_with_trace(
-          tracer,
+        tracer
+        |> ProcessQueue.Common.process_with_trace(
           processor,
           req.consumer_group,
           msg.message.topic,
@@ -1021,13 +948,12 @@ defmodule ExRocketmq.Consumer do
         end
 
       body =
-        %ConsumeMessageDirectlyResult{
+        ConsumeMessageDirectlyResult.encode(%ConsumeMessageDirectlyResult{
           order: false,
           auto_commit: true,
           consume_result: ret,
           spend_time_millis: System.system_time(:millisecond) - begin_at
-        }
-        |> ConsumeMessageDirectlyResult.encode()
+        })
 
       reply_pkt =
         Packet.packet(
@@ -1058,5 +984,41 @@ defmodule ExRocketmq.Consumer do
       new_process_task(:"Task.Supervisor.#{cid}", mq, bd, state)
 
     {pull_pid, process_pid}
+  end
+
+  defp send_running_info(pkt, broker_pid, %State{
+         client_id: cid,
+         namesrvs: namesrvs,
+         start_timestamp: start_ts,
+         consume_info_map: cmap,
+         consume_opts: %{consume_orderly: orderly}
+       }) do
+    running_info = Stats.get_running_info(:"Stats.#{cid}")
+    {:ok, addrs} = Namesrvs.addrs(namesrvs)
+
+    properties = %{
+      "PROP_NAMESERVER_ADDR" => Enum.join(addrs, ";"),
+      "PROP_CONSUME_TYPE" => "CONSUME_PASSIVELY",
+      "PROP_CONSUMEORDERLY" => (orderly && "true") || "false",
+      "PROP_THREADPOOL_CORE_SIZE" => "-1",
+      "PROP_CONSUMER_START_TIMESTAMP" => "#{start_ts}",
+      "PROP_CLIENT_VERSION" => "Elixir-#{ExRocketmq.version()}"
+    }
+
+    subs = Enum.map(cmap, fn {_topic, {sub, _, _, _}} -> sub end)
+
+    body = RunningInfo.encode(%RunningInfo{running_info | properties: properties, subscriptions: subs})
+
+    # Util.Debug.debug(body)
+
+    reply_pkt =
+      Packet.packet(
+        code: @resp_success,
+        opaque: Packet.packet(pkt, :opaque),
+        flag: 1,
+        body: body
+      )
+
+    Broker.send_reply_pkt(broker_pid, reply_pkt)
   end
 end

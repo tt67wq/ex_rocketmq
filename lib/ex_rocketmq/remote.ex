@@ -7,20 +7,18 @@ defmodule ExRocketmq.Remote do
   - pop_notify: pop the notify msg from the queue
   """
 
-  alias ExRocketmq.{
-    Transport,
-    Typespecs,
-    Remote.Serializer,
-    Remote.Packet,
-    Remote.Waiter,
-    Util.Queue,
-    Util.Random
-  }
+  use GenServer
+
+  alias ExRocketmq.Remote.Packet
+  alias ExRocketmq.Remote.Serializer
+  alias ExRocketmq.Remote.Waiter
+  alias ExRocketmq.Transport
+  alias ExRocketmq.Typespecs
+  alias ExRocketmq.Util.Queue
+  alias ExRocketmq.Util.Random
 
   require Logger
   require Packet
-
-  use GenServer
 
   @remote_opts_schema [
     transport: [
@@ -51,16 +49,14 @@ defmodule ExRocketmq.Remote do
   """
   @spec rpc(pid(), Packet.t(), non_neg_integer()) :: {:ok, Packet.t()} | {:error, any()}
   def rpc(remote, pkt, timeout \\ 30_000) do
-    try do
-      GenServer.call(remote, {:rpc, pkt}, timeout)
-    catch
-      :exit, {:timeout, _} ->
-        {:error, :timeout}
+    GenServer.call(remote, {:rpc, pkt}, timeout)
+  catch
+    :exit, {:timeout, _} ->
+      {:error, :timeout}
 
-      :exit, reason ->
-        Logger.error("remote rpc error: #{inspect(reason)}")
-        exit(reason)
-    end
+    :exit, reason ->
+      Logger.error("remote rpc error: #{inspect(reason)}")
+      exit(reason)
   end
 
   @doc """
@@ -135,7 +131,8 @@ defmodule ExRocketmq.Remote do
   end
 
   def handle_continue(:connect, %{transport: transport} = state) do
-    Transport.start(transport)
+    transport
+    |> Transport.start()
     |> case do
       {:ok, t} ->
         Process.send_after(self(), :recv, 0)
@@ -146,18 +143,11 @@ defmodule ExRocketmq.Remote do
     end
   end
 
-  def handle_call(
-        {:rpc, msg},
-        from,
-        %{
-          transport: transport,
-          serializer: serializer,
-          waiter: waiter
-        } = state
-      ) do
+  def handle_call({:rpc, msg}, from, %{transport: transport, serializer: serializer, waiter: waiter} = state) do
     {:ok, data} = Serializer.encode(serializer, msg)
 
-    Transport.output(transport, data)
+    transport
+    |> Transport.output(data)
     |> case do
       :ok ->
         Waiter.put(waiter, Packet.packet(msg, :opaque), from, ttl: 60_000)
@@ -169,16 +159,15 @@ defmodule ExRocketmq.Remote do
     end
   end
 
-  def handle_call(:transport_info, _, %{transport: transport} = state),
-    do: {:reply, Transport.info(transport), state}
+  def handle_call(:transport_info, _, %{transport: transport} = state), do: {:reply, Transport.info(transport), state}
 
-  def handle_call(:pop_notify, _from, %{notify: queue} = state),
-    do: {:reply, Queue.pop(queue), state}
+  def handle_call(:pop_notify, _from, %{notify: queue} = state), do: {:reply, Queue.pop(queue), state}
 
   def handle_cast({:one_way, msg}, %{transport: transport, serializer: serializer} = state) do
     {:ok, data} = Serializer.encode(serializer, msg)
 
-    Transport.output(transport, data)
+    transport
+    |> Transport.output(data)
     |> case do
       :ok ->
         {:noreply, state}
@@ -189,15 +178,7 @@ defmodule ExRocketmq.Remote do
     end
   end
 
-  def handle_info(
-        :recv,
-        %{
-          transport: transport,
-          serializer: serializer,
-          waiter: waiter,
-          notify: queue
-        } = state
-      ) do
+  def handle_info(:recv, %{transport: transport, serializer: serializer, waiter: waiter, notify: queue} = state) do
     with {:ok, data} <- Transport.recv(transport),
          {:ok, pkt} <- Serializer.decode(serializer, data) do
       if Packet.response_type?(pkt) do
@@ -225,7 +206,8 @@ defmodule ExRocketmq.Remote do
   defp process_response(pkt, waiter) do
     opaque = Packet.packet(pkt, :opaque)
 
-    Waiter.pop(waiter, opaque)
+    waiter
+    |> Waiter.pop(opaque)
     |> case do
       nil ->
         # maybe one-way request

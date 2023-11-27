@@ -25,20 +25,17 @@ defmodule ExRocketmq.ProcessQueue.Concurrent do
           buff: buff,
           mq: mq,
           buff_manager: buff_manager,
-          round: round,
           rt: rt,
-          failed_msg_cnt: failed_msg_cnt
+          ok_cnt: ok_cnt_o,
+          failed_cnt: failed_cnt_o
         } = state
       ) do
-    # report
     Stats.consume_report(
       :"Stats.#{cid}",
       mq,
-      round,
-      round,
-      0,
-      rt,
-      failed_msg_cnt
+      ok_cnt_o,
+      failed_cnt_o,
+      rt
     )
 
     buff
@@ -50,7 +47,7 @@ defmodule ExRocketmq.ProcessQueue.Concurrent do
         run(state)
 
       msgs ->
-        {cost, failed_cnt} = consume_msgs_concurrently(msgs, state)
+        {cost, ok_cnt, failed_cnt} = consume_msgs_concurrently(msgs, state)
 
         %MessageExt{queue_offset: last_offset} =
           Enum.max_by(msgs, & &1.queue_offset)
@@ -63,9 +60,9 @@ defmodule ExRocketmq.ProcessQueue.Concurrent do
 
         run(%State{
           state
-          | round: round + 1,
-            rt: rt + cost,
-            failed_msg_cnt: failed_msg_cnt + failed_cnt
+          | rt: rt + cost,
+            ok_cnt: ok_cnt_o + ok_cnt,
+            failed_cnt: failed_cnt_o + failed_cnt
         })
     end
   end
@@ -73,7 +70,7 @@ defmodule ExRocketmq.ProcessQueue.Concurrent do
   @spec consume_msgs_concurrently(
           list(MessageExt.t()),
           State.t()
-        ) :: {cost :: non_neg_integer(), failed_cnt :: non_neg_integer()}
+        ) :: {cost :: non_neg_integer(), ok_cnt :: non_neg_integer(), failed_cnt :: non_neg_integer()}
   defp consume_msgs_concurrently(
          message_exts,
          %State{
@@ -92,7 +89,7 @@ defmodule ExRocketmq.ProcessQueue.Concurrent do
 
     since = System.system_time(:millisecond)
 
-    failed_cnt =
+    {ok_cnt, failed_cnt} =
       message_exts
       |> Enum.chunk_every(consume_batch_size)
       |> Task.async_stream(fn msgs ->
@@ -100,7 +97,7 @@ defmodule ExRocketmq.ProcessQueue.Concurrent do
         |> Common.process_with_trace(processor, group_name, topic, msgs)
         |> case do
           :success ->
-            0
+            {:success, Enum.count(msgs)}
 
           {:retry_later, delay_level_map} ->
             # send msg back
@@ -109,11 +106,14 @@ defmodule ExRocketmq.ProcessQueue.Concurrent do
             |> Enum.reject(&(&1.delay_level == 0))
             |> Common.send_msgs_back(state)
 
-            Enum.count(msgs)
+            {:failed, Enum.count(msgs)}
         end
       end)
-      |> Enum.reduce(0, fn {:ok, x}, acc -> acc + x end)
+      |> Enum.reduce({0, 0}, fn
+        {:ok, {:success, cnt}}, {ok, failed} -> {ok + cnt, failed}
+        {:ok, {:failed, cnt}}, {ok, failed} -> {ok, failed + cnt}
+      end)
 
-    {System.system_time(:millisecond) - since, failed_cnt}
+    {System.system_time(:millisecond) - since, ok_cnt, failed_cnt}
   end
 end
