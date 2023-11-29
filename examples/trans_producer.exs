@@ -1,5 +1,11 @@
+# {:ex_rocketmq, github: "tt67wq/ex_rocketmq", branch: "master"}
+
+# @topic "POETRY_ORDERLY"
+alias ExRocketmq.Namesrvs
+alias ExRocketmq.Producer
+alias ExRocketmq.Transport
+
 Mix.install([
-  # {:ex_rocketmq, github: "tt67wq/ex_rocketmq", branch: "master"}
   {:ex_rocketmq, path: "../ex_rocketmq"}
 ])
 
@@ -10,10 +16,9 @@ defmodule DemoProducer do
 
   use Task
 
-  alias ExRocketmq.Producer
   alias ExRocketmq.Models.Message
+  alias ExRocketmq.Producer
 
-  # @topic "POETRY_ORDERLY"
   @topic "POETRY"
 
   @msgs "豫章故郡，洪都新府。
@@ -74,17 +79,12 @@ defmodule DemoProducer do
     Task.start_link(__MODULE__, :run, [opts])
   end
 
-  defp get_msg() do
-    @msgs
-    |> String.split("\n")
+  defp get_msg do
+    String.split(@msgs, "\n")
   end
 
   def run(opts) do
-    get_msg()
-    |> Enum.each(fn msg ->
-      Producer.send_transaction_msg(:producer, %Message{topic: @topic, body: msg})
-    end)
-
+    Enum.each(get_msg(), fn msg -> Producer.send_transaction_msg(:producer, %Message{topic: @topic, body: msg}) end)
     Process.sleep(1000)
     run(opts)
   end
@@ -104,12 +104,10 @@ defmodule MockTransaction do
 
   @type t :: %__MODULE__{}
 
-  def new(), do: %__MODULE__{}
+  def new, do: %__MODULE__{}
 
   def execute_local(_, msg) do
-    Logger.info(
-      "execute local transaction for #{inspect(msg)} in mock transaction implementation"
-    )
+    Logger.info("execute local transaction for #{inspect(msg)} in mock transaction implementation")
 
     {:ok, :commit}
   end
@@ -119,8 +117,6 @@ defmodule MockTransaction do
     {:ok, :commit}
   end
 end
-
-alias ExRocketmq.{Producer, Namesrvs, Transport}
 
 Supervisor.start_link(
   [

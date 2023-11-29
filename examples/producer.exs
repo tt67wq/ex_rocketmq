@@ -1,5 +1,11 @@
+# {:ex_rocketmq, github: "tt67wq/ex_rocketmq", branch: "master"}
+
+# @topic "POETRY_ORDERLY"
+alias ExRocketmq.Namesrvs
+alias ExRocketmq.Producer
+alias ExRocketmq.Transport
+
 Mix.install([
-  # {:ex_rocketmq, github: "tt67wq/ex_rocketmq", branch: "master"}
   {:ex_rocketmq, path: "../ex_rocketmq"}
 ])
 
@@ -10,10 +16,9 @@ defmodule DemoProducer do
 
   use Task
 
-  alias ExRocketmq.Producer
   alias ExRocketmq.Models.Message
+  alias ExRocketmq.Producer
 
-  # @topic "POETRY_ORDERLY"
   @topic "POETRY"
 
   @msgs "豫章故郡，洪都新府。
@@ -74,9 +79,8 @@ defmodule DemoProducer do
     Task.start_link(__MODULE__, :run, [opts])
   end
 
-  defp get_msg() do
-    @msgs
-    |> String.split("\n")
+  defp get_msg do
+    String.split(@msgs, "\n")
   end
 
   def run(opts) do
@@ -84,10 +88,7 @@ defmodule DemoProducer do
     |> Enum.chunk_every(2)
     |> Enum.each(fn msgs ->
       to_emit =
-        msgs
-        |> Enum.map(fn msg ->
-          %Message{topic: @topic, body: msg}
-        end)
+        Enum.map(msgs, fn msg -> %Message{topic: @topic, body: msg} end)
 
       Producer.send_sync(:producer, to_emit)
     end)
@@ -96,8 +97,6 @@ defmodule DemoProducer do
     run(opts)
   end
 end
-
-alias ExRocketmq.{Producer, Namesrvs, Transport}
 
 {:ok, _pid} =
   Supervisor.start_link(

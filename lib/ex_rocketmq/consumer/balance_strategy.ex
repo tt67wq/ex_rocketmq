@@ -3,7 +3,7 @@ defmodule ExRocketmq.Consumer.BalanceStrategy do
   The balance strategy behaviour of consumer
   """
 
-  alias ExRocketmq.Models.{MessageQueue}
+  alias ExRocketmq.Models.MessageQueue
   alias ExRocketmq.Typespecs
 
   @type t :: struct()
@@ -15,8 +15,7 @@ defmodule ExRocketmq.Consumer.BalanceStrategy do
               cid_all :: list(String.t())
             ) :: {:ok, list(MessageQueue.t())}
 
-  defp delegate(%module{} = m, func, args),
-    do: apply(module, func, [m | args])
+  defp delegate(%module{} = m, func, args), do: apply(module, func, [m | args])
 
   @doc """
   Implementing a strategy to allocate an appropriate message queue for the current client
@@ -37,8 +36,7 @@ defmodule ExRocketmq.Consumer.BalanceStrategy do
           mq_all :: list(MessageQueue.t()),
           cid_all :: list(String.t())
         ) :: {:ok, list(MessageQueue.t())}
-  def allocate(m, client_id, mq_all, cid_all),
-    do: delegate(m, :allocate, [client_id, mq_all, cid_all])
+  def allocate(m, client_id, mq_all, cid_all), do: delegate(m, :allocate, [client_id, mq_all, cid_all])
 end
 
 defmodule ExRocketmq.Consumer.BalanceStrategy.Average do
@@ -66,20 +64,20 @@ defmodule ExRocketmq.Consumer.BalanceStrategy.Average do
 
   """
 
-  alias ExRocketmq.Consumer.BalanceStrategy
-  alias ExRocketmq.Models.{MessageQueue}
-  alias ExRocketmq.Typespecs
+  @behaviour ExRocketmq.Consumer.BalanceStrategy
 
   import ExRocketmq.Util.Assertion
 
-  require Logger
+  alias ExRocketmq.Consumer.BalanceStrategy
+  alias ExRocketmq.Models.MessageQueue
+  alias ExRocketmq.Typespecs
 
-  @behaviour BalanceStrategy
+  require Logger
 
   defstruct []
 
   @spec new() :: BalanceStrategy.t()
-  def new(), do: %__MODULE__{}
+  def new, do: %__MODULE__{}
 
   @impl BalanceStrategy
   @spec allocate(
@@ -114,13 +112,15 @@ defmodule ExRocketmq.Consumer.BalanceStrategy.Average do
     mq_size = Enum.count(mq_all)
     cid_size = Enum.count(cid_all)
 
-    div(mq_size, cid_size)
+    mq_size
+    |> div(cid_size)
     |> case do
       0 ->
         [mq_all]
 
       average_size ->
-        rem(mq_size, cid_size)
+        mq_size
+        |> rem(cid_size)
         |> case do
           0 -> Enum.chunk_every(mq_all, average_size)
           _ -> Enum.chunk_every(mq_all, average_size + 1)

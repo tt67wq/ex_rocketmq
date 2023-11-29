@@ -15,9 +15,9 @@ defmodule ExRocketmq.Compress.Zlib do
       iex> ExRocketmq.Compress.Zlib.uncompress(compressed)
       "hello world"
   """
-  alias ExRocketmq.{Compressor}
+  @behaviour ExRocketmq.Compressor
 
-  @behaviour Compressor
+  alias ExRocketmq.Compressor
 
   @impl Compressor
   def compress(data, opts \\ [level: :best_compression]) do

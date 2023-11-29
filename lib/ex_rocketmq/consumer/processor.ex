@@ -31,8 +31,7 @@ defmodule ExRocketmq.Consumer.Processor do
   @callback process(processort :: t(), topic :: Typespecs.topic(), msgs :: [MessageExt.t()]) ::
               consume_result() | {:error, term()}
 
-  defp delegate(%module{} = m, func, args),
-    do: apply(module, func, [m | args])
+  defp delegate(%module{} = m, func, args), do: apply(module, func, [m | args])
 
   @spec process(t(), Typespecs.topic(), [MessageExt.t()]) :: consume_result() | {:error, term()}
   def process(m, topic, msgs), do: delegate(m, :process, [topic, msgs])
