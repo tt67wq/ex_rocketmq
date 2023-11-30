@@ -8,13 +8,10 @@ defmodule ConsumerTest do
   alias ExRocketmq.Models.{Message}
 
   setup_all do
-    %{
-      "host" => host,
-      "port" => port,
-      "topic" => topic,
-      "group" => group
-    } =
-      File.read!("./tmp/producer.json") |> Jason.decode!()
+    configs = Application.get_all_env(:ex_rocketmq)
+
+    {host, port} = configs[:namesrvs]
+    %{group: group, topic: topic} = configs[:consumer]
 
     namesrvs_opts = [
       remotes: [

@@ -6,19 +6,17 @@ defmodule RemoteTest do
   require Request
 
   @req_get_broker_cluster_info Request.req_get_broker_cluster_info()
+  @timeout 5000
 
   setup_all do
-    %{
-      "host" => host,
-      "port" => port,
-      "timeout" => timeout,
-      "topic" => topic
-    } =
-      File.read!("./tmp/test.json") |> Jason.decode!()
+    configs = Application.get_all_env(:ex_rocketmq)
+
+    {host, port} = configs[:namesrvs]
+    %{group: group, topic: topic} = configs[:consumer]
 
     r =
       start_supervised!(
-        {Remote, transport: Transport.Tcp.new(host: host, port: port, timeout: timeout)}
+        {Remote, transport: Transport.Tcp.new(host: host, port: port, timeout: @timeout)}
       )
 
     [remote: r, topic: topic]

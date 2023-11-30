@@ -4,24 +4,42 @@ defmodule BrokerTest do
   """
   use ExUnit.Case
 
-  alias ExRocketmq.{Broker, Transport, Util.Debug, Models}
+  alias ExRocketmq.{Broker, Transport, Util.Debug, Models, Consumer, Namesrvs}
 
   setup_all do
-    %{
-      "host" => host,
-      "port" => port,
-      "topic" => topic,
-      "group" => group,
-      "broker_name" => broker_name
-    } =
-      File.read!("./tmp/broker.json") |> Jason.decode!()
+    configs = Application.get_all_env(:ex_rocketmq)
+
+    {host, port} = configs[:namesrvs]
+    %{group: group, topic: topic} = configs[:consumer]
+    [{broker_name, {broker_host, broker_port}}] = configs[:brokers]
 
     opts = [
-      broker_name: "test_broker",
-      remote_opts: [transport: Transport.Tcp.new(host: host, port: port)]
+      broker_name: broker_name,
+      remote_opts: [transport: Transport.Tcp.new(host: broker_host, port: broker_port)]
     ]
 
     pid = start_supervised!({Broker, opts})
+
+    # TODO define nameserv、consumer
+    namesrvs_opts = [
+      remotes: [
+        [transport: Transport.Tcp.new(host: host, port: port)]
+      ]
+    ]
+
+    namesrvs = start_supervised!({Namesrvs, namesrvs_opts})
+
+    consumer =
+      start_supervised!(
+        {Consumer,
+         [
+           consumer_group: group,
+           namesrvs: namesrvs,
+           processor: %ExRocketmq.Consumer.MockProcessor{},
+           subscriptions: %{"POETRY" => Models.MsgSelector.new(:tag, "*")}
+         ]}
+      )
+
     [broker: pid, topic: topic, group: group, broker_name: broker_name]
   end
 
@@ -205,7 +223,7 @@ defmodule BrokerTest do
                broker,
                %Models.ConsumerSendMsgBack{
                  group: group,
-                 offset: 296_368_101_057,
+                 offset: 0,
                  delay_level: 1,
                  origin_msg_id: "31302E38382E342E3237000051AF000A91F9",
                  origin_topic: topic,
@@ -215,8 +233,7 @@ defmodule BrokerTest do
   end
 
   test "get_consumer_list_by_group", %{broker: broker, group: group} do
-    assert {:ok, _} =
-             Broker.get_consumer_list_by_group(broker, group)
+    assert {:ok, _} = Broker.get_consumer_list_by_group(broker, group)
   end
 
   # test "end_transaction", %{broker: broker, topic: topic, group: group} do
