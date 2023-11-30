@@ -1,9 +1,9 @@
-use Mix.Config
+import Config
 
 config :ex_rocketmq,
   namesrvs: {"127.0.0.1", 9876},
   brokers: [
-    {"broker-a", {"127.0.0.1", 10911}}
+    {"broker-a", {"127.0.0.1", 10_911}}
   ],
   consumer: %{
     topic: "TopicTest",

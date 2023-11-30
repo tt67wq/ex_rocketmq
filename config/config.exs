@@ -1,4 +1,4 @@
-use Mix.Config
+import Config
 
 env_config = Path.expand("#{Mix.env()}.exs", __DIR__)
 
