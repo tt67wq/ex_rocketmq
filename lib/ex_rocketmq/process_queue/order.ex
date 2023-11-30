@@ -20,19 +20,17 @@ defmodule ExRocketmq.ProcessQueue.Order do
           mq: mq,
           buff_manager: buff_manager,
           buff: buff,
-          round: round,
           rt: rt,
-          failed_msg_cnt: failed_msg_cnt
+          ok_cnt: ok_cnt_o,
+          failed_cnt: failed_cnt_o
         } = state
       ) do
     Stats.consume_report(
       :"Stats.#{cid}",
       mq,
-      round,
-      round,
-      0,
-      rt,
-      failed_msg_cnt
+      ok_cnt_o,
+      failed_cnt_o,
+      rt
     )
 
     buff
@@ -44,7 +42,7 @@ defmodule ExRocketmq.ProcessQueue.Order do
         run(state)
 
       msgs ->
-        {cost, failed_cnt} = consume_msgs_orderly(msgs, state)
+        {cost, ok_cnt, failed_cnt} = consume_msgs_orderly(msgs, state)
 
         %MessageExt{queue_offset: last_offset} =
           Enum.max_by(msgs, & &1.queue_offset)
@@ -55,32 +53,32 @@ defmodule ExRocketmq.ProcessQueue.Order do
           last_offset
         )
 
-        run(%State{state | round: round + 1, rt: rt + cost, failed_msg_cnt: failed_msg_cnt + failed_cnt})
+        run(%State{state | rt: rt + cost, ok_cnt: ok_cnt_o + ok_cnt, failed_cnt: failed_cnt_o + failed_cnt})
     end
   end
 
   @spec consume_msgs_orderly(
           list(MessageExt.t()),
           State.t()
-        ) :: {cost :: non_neg_integer(), failed_cnt :: non_neg_integer()}
+        ) :: {cost :: non_neg_integer(), ok_cnt :: non_neg_integer(), failed_cnt :: non_neg_integer()}
   defp consume_msgs_orderly(message_exts, %State{consume_batch_size: consume_batch_size} = state) do
     since = System.system_time(:millisecond)
 
-    failed_cnt =
+    {ok_cnt, failed_cnt} =
       message_exts
       |> Enum.sort_by(fn msg -> msg.queue_offset end)
       |> Enum.chunk_every(consume_batch_size)
-      |> do_consume(state, 0)
+      |> do_consume(state, {0, 0})
 
-    {System.system_time(:millisecond) - since, failed_cnt}
+    {System.system_time(:millisecond) - since, ok_cnt, failed_cnt}
   end
 
   @spec do_consume(
           list(list(MessageExt.t())),
           State.t(),
-          non_neg_integer()
-        ) :: non_neg_integer()
-  defp do_consume([], _, failed_cnt), do: failed_cnt
+          {ok_cnt :: non_neg_integer(), failed_cnt :: non_neg_integer()}
+        ) :: {ok_cnt :: non_neg_integer(), failed_cnt :: non_neg_integer()}
+  defp do_consume([], _, summary), do: summary
 
   defp do_consume(
          [msgs | tail],
@@ -92,7 +90,7 @@ defmodule ExRocketmq.ProcessQueue.Order do
            trace_enable: trace_enable,
            max_reconsume_times: max_reconsume_times
          } = state,
-         failed_cnt
+         {ok_cnt, failed_cnt}
        ) do
     tracer =
       if trace_enable do
@@ -103,7 +101,7 @@ defmodule ExRocketmq.ProcessQueue.Order do
     |> Common.process_with_trace(processor, group_name, topic, msgs)
     |> case do
       :success ->
-        do_consume(tail, state, failed_cnt)
+        do_consume(tail, state, {ok_cnt + Enum.count(msgs), failed_cnt})
 
       {:suspend, delay, msg_ids} ->
         Process.sleep(delay)
@@ -121,9 +119,9 @@ defmodule ExRocketmq.ProcessQueue.Order do
         end
 
         if length(to_retry) > 0 do
-          do_consume([to_retry | tail], state, failed_cnt + Enum.count(to_sendback))
+          do_consume([to_retry | tail], state, {ok_cnt, failed_cnt + Enum.count(to_sendback)})
         else
-          do_consume(tail, state, failed_cnt + Enum.count(to_sendback))
+          do_consume(tail, state, {ok_cnt, failed_cnt + Enum.count(to_sendback)})
         end
     end
   end

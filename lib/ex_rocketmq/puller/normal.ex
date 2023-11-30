@@ -35,12 +35,12 @@ defmodule ExRocketmq.Puller.Normal do
           buff_manager: buff_manager,
           broker_data: bd,
           holding_msgs: [],
-          round: round,
+          pull_cnt: pull_cnt,
           rt: rt
         } = state
       ) do
     # report first
-    Stats.puller_report(:"Stats.#{cid}", mq, false, 0, round, rt)
+    Stats.puller_report(:"Stats.#{cid}", mq, false, 0, pull_cnt, rt)
 
     {buff, commit_offset, commit?} = BuffManager.get_or_new(buff_manager, mq)
     req = Common.new_pull_request(state, commit_offset, commit?)
@@ -63,10 +63,17 @@ defmodule ExRocketmq.Puller.Normal do
       {[], _, cost} ->
         # pull failed or no new msgs, suspend for a while
         Process.sleep(5000)
-        run(%State{state | round: round + 1, rt: rt + cost})
+        run(%State{state | rt: rt + cost})
 
       {msgs, next_offset, cost} ->
-        run(%State{state | holding_msgs: msgs, next_offset: next_offset, buff: buff, round: round + 1, rt: rt + cost})
+        run(%State{
+          state
+          | holding_msgs: msgs,
+            next_offset: next_offset,
+            buff: buff,
+            pull_cnt: pull_cnt + Enum.count(msgs),
+            rt: rt + cost
+        })
     end
   end
 

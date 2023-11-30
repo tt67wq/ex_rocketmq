@@ -55,6 +55,11 @@ defmodule ExRocketmq.Util.Buffer do
     Agent.start_link(__MODULE__, :init, [name, size, opts], name: name)
   end
 
+  @spec stop(atom()) :: :ok
+  def stop(name) do
+    Agent.stop(name)
+  end
+
   @doc """
   Adds the given items to the buffer queue.
 
@@ -101,11 +106,6 @@ defmodule ExRocketmq.Util.Buffer do
     Agent.get_and_update(name, __MODULE__, :handle_take, [], timeout)
   end
 
-  @spec stop(atom()) :: :ok
-  def stop(name) do
-    Agent.stop(name)
-  end
-
   @doc """
   Returns the number of items in the buffer queue.
 
@@ -121,6 +121,39 @@ defmodule ExRocketmq.Util.Buffer do
   @spec size(atom(), non_neg_integer()) :: non_neg_integer()
   def size(name, timeout \\ 5000) do
     Agent.get(name, __MODULE__, :handle_size, [], timeout)
+  end
+
+  @doc """
+  Returns the last value in the buffer queue.
+
+  ## Examples
+
+      iex> {:ok, _pid} = ExRocketmq.Util.Buffer.start_link(:my_queue, 10)
+      iex> ExRocketmq.Util.Buffer.put(:my_queue, [1, 2, 3])
+      :ok
+      iex> ExRocketmq.Util.Buffer.last(:my_queue)
+      3
+
+  """
+  @spec last(atom(), non_neg_integer()) :: any()
+  def last(name, timeout \\ 5000) do
+    Agent.get(name, __MODULE__, :handle_last, [], timeout)
+  end
+
+  @doc """
+  Returns the first value in the buffer queue.
+
+  ## Examples
+
+      iex> {:ok, _pid} = ExRocketmq.Util.Buffer.start_link(:my_queue, 10)
+      iex> ExRocketmq.Util.Buffer.put(:my_queue, [1, 2, 3])
+      :ok
+      iex> ExRocketmq.Util.Buffer.first(:my_queue)
+      1
+
+  """
+  def first(name, timeout \\ 5000) do
+    Agent.get(name, __MODULE__, :handle_first, [], timeout)
   end
 
   @doc false
@@ -141,13 +174,7 @@ defmodule ExRocketmq.Util.Buffer do
 
   @doc false
   def handle_put(
-        state = %__MODULE__{
-          buff: buff,
-          buff_size: buff_size,
-          capacity: capacity,
-          touch: touch,
-          gc_freq: gc_freq
-        },
+        %__MODULE__{buff: buff, buff_size: buff_size, capacity: capacity, touch: touch, gc_freq: gc_freq} = state,
         items
       ) do
     if Enum.count(items) + buff_size > capacity do
@@ -173,18 +200,36 @@ defmodule ExRocketmq.Util.Buffer do
   end
 
   @doc false
-  def handle_take(state = %__MODULE__{buff_size: 0}), do: {[], state}
+  def handle_take(%__MODULE__{buff_size: 0} = state), do: {[], state}
 
-  def handle_take(
-        state = %__MODULE__{
-          buff: buff,
-          buff_size: buff_size
-        }
-      ) do
-    {:ets.select(buff, [{{:"$1", :"$2"}, [{:<, :"$1", buff_size}], [:"$2"]}]),
-     %__MODULE__{state | buff_size: 0}}
+  def handle_take(%__MODULE__{buff: buff, buff_size: buff_size} = state) do
+    {:ets.select(buff, [{{:"$1", :"$2"}, [{:<, :"$1", buff_size}], [:"$2"]}]), %__MODULE__{state | buff_size: 0}}
   end
 
   @doc false
   def handle_size(%__MODULE__{buff_size: buff_size}), do: buff_size
+
+  @doc false
+  def handle_last(%__MODULE__{buff: buff, buff_size: buff_size}) do
+    case buff_size do
+      0 ->
+        nil
+
+      _ ->
+        [{_, val}] = :ets.lookup(buff, buff_size - 1)
+        val
+    end
+  end
+
+  @doc false
+  def handle_first(%__MODULE__{buff: buff, buff_size: buff_size}) do
+    case buff_size do
+      0 ->
+        nil
+
+      _ ->
+        [{_, val}] = :ets.lookup(buff, 0)
+        val
+    end
+  end
 end

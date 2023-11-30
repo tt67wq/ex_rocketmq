@@ -25,19 +25,17 @@ defmodule ExRocketmq.Namesrvs do
 
   use GenServer
 
-  alias ExRocketmq.{
-    Remote,
-    Typespecs,
-    Remote.Packet,
-    Protocol.Request,
-    Protocol.Response,
-    Models
-  }
+  alias ExRocketmq.Models
+  alias ExRocketmq.Protocol.Request
+  alias ExRocketmq.Protocol.Response
+  alias ExRocketmq.Remote
+  alias ExRocketmq.Remote.Packet
+  alias ExRocketmq.Typespecs
 
+  require Logger
   require Packet
   require Request
   require Response
-  require Logger
 
   # request constants
   @req_get_routeinfo_by_topic Request.req_get_routeinfo_by_topic()
@@ -163,6 +161,11 @@ defmodule ExRocketmq.Namesrvs do
     end
   end
 
+  @spec addrs(pid() | atom()) :: Typespecs.ok_t([String.t()]) | Typespecs.error_t()
+  def addrs(namesrvs) do
+    GenServer.call(namesrvs, :addrs)
+  end
+
   # because of fastjson, brokerAddrs is a integer-keyed map, which is invalid json
   # we replace integer-keyed map with string-keyed map here
   defp fix_invalid_json(input) do
@@ -195,22 +198,18 @@ defmodule ExRocketmq.Namesrvs do
   # -------- server -------
 
   def init(remotes: remotes) do
-    remote_pids =
+    q =
       remotes
       |> Enum.map(fn r ->
         {:ok, pid} = Remote.start_link(r)
         pid
       end)
-      |> List.to_tuple()
+      |> :queue.from_list()
 
-    {:ok, %{remotes: remote_pids, opaque: 0, index: 0, size: length(remotes)}}
+    {:ok, %{remotes: q, opaque: 0}}
   end
 
-  def handle_call(
-        {:rpc, code, body, ext_fields},
-        _from,
-        %{remotes: remotes, opaque: opaque, index: index, size: size} = state
-      ) do
+  def handle_call({:rpc, code, body, ext_fields}, _from, %{remotes: q, opaque: opaque} = state) do
     pkt =
       Packet.packet(
         code: code,
@@ -219,18 +218,28 @@ defmodule ExRocketmq.Namesrvs do
         body: body
       )
 
-    reply =
-      remotes
-      |> elem(index)
-      |> Remote.rpc(pkt)
+    {{:value, remote}, q} = :queue.out(q)
 
-    {:reply, reply, %{state | opaque: opaque + 1, index: rem(index + 1, size)}}
+    reply = Remote.rpc(remote, pkt)
+
+    {:reply, reply, %{state | opaque: opaque + 1, remotes: :queue.in(remote, q)}}
+  end
+
+  def handle_call(:addrs, _from, %{remotes: q} = state) do
+    addrs =
+      q
+      |> :queue.to_list()
+      |> Enum.map(fn x ->
+        {:ok, %{host: host, port: port}} = Remote.transport_info(x)
+        "#{host}:#{port}"
+      end)
+
+    {:reply, {:ok, addrs}, state}
   end
 
   def terminate(reason, %{remotes: remotes}) do
     Logger.warning("namesrvs terminated with reason: #{inspect(reason)}")
 
-    remotes
-    |> Enum.each(&Remote.stop/1)
+    Enum.each(remotes, &Remote.stop/1)
   end
 end

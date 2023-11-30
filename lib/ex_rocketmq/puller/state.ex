@@ -21,7 +21,7 @@ defmodule ExRocketmq.Puller.State do
             buff: nil,
             holding_msgs: [],
             lock_ttl: -1,
-            round: 0,
+            pull_cnt: 0,
             last_lock_timestamp: 0,
             rt: 0
 
@@ -40,7 +40,7 @@ defmodule ExRocketmq.Puller.State do
           buff: atom(),
           holding_msgs: [MessageExt.t()],
           lock_ttl: integer(),
-          round: non_neg_integer(),
+          pull_cnt: non_neg_integer(),
           last_lock_timestamp: non_neg_integer(),
           rt: non_neg_integer()
         }

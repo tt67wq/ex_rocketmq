@@ -17,9 +17,9 @@ defmodule ExRocketmq.ProcessQueue.State do
             consume_batch_size: 32,
             trace_enable: false,
             max_reconsume_times: 3,
-            round: 0,
             rt: 0,
-            failed_msg_cnt: 0
+            ok_cnt: 0,
+            failed_cnt: 0
 
   @type t :: %__MODULE__{
           client_id: String.t(),
@@ -32,8 +32,8 @@ defmodule ExRocketmq.ProcessQueue.State do
           consume_batch_size: non_neg_integer(),
           trace_enable: boolean(),
           max_reconsume_times: non_neg_integer(),
-          round: non_neg_integer(),
           rt: non_neg_integer(),
-          failed_msg_cnt: non_neg_integer()
+          ok_cnt: non_neg_integer(),
+          failed_cnt: non_neg_integer()
         }
 end

@@ -20,7 +20,7 @@ defmodule ExRocketmq.Consumer.Supervisor do
       {Task.Supervisor, name: :"Task.Supervisor.#{cid}"},
       {DynamicSupervisor, name: :"DynamicSupervisor.#{cid}"},
       {ExRocketmq.Consumer.BuffManager, name: :"BuffManager.#{cid}"},
-      {ExRocketmq.Stats, name: :"Stats.#{cid}"}
+      {ExRocketmq.Stats, name: :"Stats.#{cid}", client_id: cid}
     ]
 
     children =
