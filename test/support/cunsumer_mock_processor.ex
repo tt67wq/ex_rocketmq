@@ -1,11 +1,10 @@
 defmodule ExRocketmq.Consumer.MockProcessor do
-  alias ExRocketmq.{
-    Consumer.Processor,
-    Models.MessageExt,
-    Typespecs
-  }
+  @moduledoc false
+  @behaviour ExRocketmq.Consumer.Processor
 
-  @behaviour Processor
+  alias ExRocketmq.Consumer.Processor
+  alias ExRocketmq.Models.MessageExt
+  alias ExRocketmq.Typespecs
 
   defstruct []
 
@@ -17,11 +16,7 @@ defmodule ExRocketmq.Consumer.MockProcessor do
   @spec process(t(), Typespecs.topic(), [MessageExt.t()]) ::
           Processor.consume_result() | {:error, term()}
   def process(_, _topic, msgs) do
-    msgs
-    |> Enum.each(fn msg ->
-      IO.inspect(msg)
-    end)
-
+    Enum.each(msgs, fn msg -> IO.inspect(msg) end)
     :success
   end
 end

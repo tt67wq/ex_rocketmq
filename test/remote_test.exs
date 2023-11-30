@@ -1,7 +1,12 @@
 defmodule RemoteTest do
+  @moduledoc false
   use ExUnit.Case
 
-  alias ExRocketmq.{Remote, Transport, Remote.Packet, Protocol.Request}
+  alias ExRocketmq.Protocol.Request
+  alias ExRocketmq.Remote
+  alias ExRocketmq.Remote.Packet
+  alias ExRocketmq.Transport
+
   require Packet
   require Request
 
@@ -12,17 +17,15 @@ defmodule RemoteTest do
     configs = Application.get_all_env(:ex_rocketmq)
 
     {host, port} = configs[:namesrvs]
-    %{group: group, topic: topic} = configs[:consumer]
+    %{topic: topic} = configs[:consumer]
 
     r =
-      start_supervised!(
-        {Remote, transport: Transport.Tcp.new(host: host, port: port, timeout: @timeout)}
-      )
+      start_supervised!({Remote, transport: Transport.Tcp.new(host: host, port: port, timeout: @timeout)})
 
     [remote: r, topic: topic]
   end
 
-  test "rpc", %{remote: r, topic: topic} do
+  test "rpc", %{remote: r} do
     assert {:ok, _} =
              Remote.rpc(
                r,

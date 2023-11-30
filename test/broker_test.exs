@@ -4,7 +4,12 @@ defmodule BrokerTest do
   """
   use ExUnit.Case
 
-  alias ExRocketmq.{Broker, Transport, Util.Debug, Models, Consumer, Namesrvs}
+  alias ExRocketmq.Broker
+  alias ExRocketmq.Consumer
+  alias ExRocketmq.Models
+  alias ExRocketmq.Namesrvs
+  alias ExRocketmq.Transport
+  alias ExRocketmq.Util.Debug
 
   setup_all do
     configs = Application.get_all_env(:ex_rocketmq)
@@ -139,36 +144,32 @@ defmodule BrokerTest do
 
   test "pull_message", %{broker: broker, topic: topic, group: group} do
     assert {:ok, _} =
-             Broker.pull_message(
-               broker,
-               %Models.PullMsg.Request{
-                 consumer_group: group,
-                 topic: topic,
-                 queue_id: 0,
-                 queue_offset: 0,
-                 max_msg_nums: 32,
-                 sys_flag: 2,
-                 commit_offset: 0,
-                 suspend_timeout_millis: 20_000,
-                 sub_expression: "*",
-                 sub_version: 0,
-                 expression_type: "TAG"
-               }
-             )
+             broker
+             |> Broker.pull_message(%Models.PullMsg.Request{
+               consumer_group: group,
+               topic: topic,
+               queue_id: 0,
+               queue_offset: 0,
+               max_msg_nums: 32,
+               sys_flag: 2,
+               commit_offset: 0,
+               suspend_timeout_millis: 20_000,
+               sub_expression: "*",
+               sub_version: 0,
+               expression_type: "TAG"
+             })
              |> Debug.debug()
   end
 
   @tag :must_exec
   test "query_consumer_offset", %{broker: broker, topic: topic, group: group} do
     assert {:ok, _} =
-             Broker.query_consumer_offset(
-               broker,
-               %Models.QueryConsumerOffset{
-                 consumer_group: group,
-                 topic: "WANQIANG_TEST",
-                 queue_id: 1
-               }
-             )
+             broker
+             |> Broker.query_consumer_offset(%Models.QueryConsumerOffset{
+               consumer_group: group,
+               topic: "WANQIANG_TEST",
+               queue_id: 1
+             })
              |> Debug.debug()
   end
 
@@ -266,17 +267,13 @@ defmodule BrokerTest do
     }
 
     assert {:ok, _} =
-             Broker.lock_batch_mq(
-               broker,
-               req
-             )
+             broker
+             |> Broker.lock_batch_mq(req)
              |> Debug.debug()
 
     assert :ok =
-             Broker.unlock_batch_mq(
-               broker,
-               req
-             )
+             broker
+             |> Broker.unlock_batch_mq(req)
              |> Debug.debug()
   end
 end
