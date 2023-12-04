@@ -71,7 +71,8 @@ defmodule ExRocketmq.Remote.Packet do
 
   @spec response_type?(t()) :: boolean()
   def response_type?(m) do
-    packet(m, :flag)
+    m
+    |> packet(:flag)
     |> Bitwise.band(@response_type)
     |> Kernel.==(@response_type)
   end

@@ -2,14 +2,21 @@ defmodule ExRocketmq.MixProject do
   @moduledoc false
   use Mix.Project
 
+  @name "lib_oss"
+  @repo_url "https://github.com/tt67wq/ex_rocketmq"
+  @description "Elixir client for Apache RocketMQ"
+
   def project do
     [
       app: :ex_rocketmq,
       version: "0.1.0",
-      elixir: "~> 1.14",
+      elixir: "~> 1.15",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      source_url: @repo_url,
+      package: package(),
+      description: @description
     ]
   end
 
@@ -34,8 +41,15 @@ defmodule ExRocketmq.MixProject do
       {:dialyxir, "~> 1.3", only: [:dev], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.29", only: :dev, runtime: false}
-      # {:dep_from_hexpm, "~> 0.3.0"},
-      # {:dep_from_git, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"}
+    ]
+  end
+
+  defp package do
+    [
+      licenses: ["MIT"],
+      links: %{
+        "GitHub" => @repo_url
+      }
     ]
   end
 end
