@@ -15,6 +15,7 @@ defmodule ExRocketmq.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       source_url: @repo_url,
+      name: @name,
       package: package(),
       description: @description
     ]

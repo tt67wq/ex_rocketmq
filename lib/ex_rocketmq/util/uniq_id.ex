@@ -18,13 +18,13 @@ defmodule ExRocketmq.Util.UniqId do
       "0A93667D3B0A0000000063952A000001"
   """
 
+  use Agent
+
   defmodule State do
     @moduledoc false
 
     defstruct counter: 0, begin_ts: 0, next_ts: 0, prefix: ""
   end
-
-  use Agent
 
   @doc """
   generate a unique id
@@ -51,12 +51,10 @@ defmodule ExRocketmq.Util.UniqId do
       fn %{prefix: prefix, counter: counter, begin_ts: begin} ->
         gap = :os.system_time(:second) - begin
 
-        [
+        IO.iodata_to_binary([
           prefix,
-          <<gap * 1000::big-integer-size(32), counter::big-integer-size(16)>>
-          |> Base.encode16(case: :upper)
-        ]
-        |> IO.iodata_to_binary()
+          Base.encode16(<<gap * 1000::big-integer-size(32), counter::big-integer-size(16)>>, case: :upper)
+        ])
       end
     )
   end
@@ -88,16 +86,22 @@ defmodule ExRocketmq.Util.UniqId do
   def stop(pid), do: Agent.stop(pid)
 
   @spec get_pid() :: non_neg_integer()
-  defp get_pid() do
-    System.pid()
-    |> String.to_integer()
+  defp get_pid do
+    String.to_integer(System.pid())
   end
 
-  defp get_time_range() do
+  defp get_time_range do
     %{year: y, month: m} = Date.utc_today()
     time = Time.new!(0, 0, 0)
-    begin = DateTime.new!(Date.new!(y, m, 1), time) |> DateTime.to_unix()
-    next = DateTime.new!(Date.new!(y, m + 1, 1), time) |> DateTime.to_unix()
+    begin = y |> Date.new!(m, 1) |> DateTime.new!(time) |> DateTime.to_unix()
+
+    next =
+      if m == 12 do
+        (y + 1) |> Date.new!(1, 1) |> DateTime.new!(time) |> DateTime.to_unix()
+      else
+        y |> Date.new!(m + 1, 1) |> DateTime.new!(time) |> DateTime.to_unix()
+      end
+
     {begin, next}
   end
 end
