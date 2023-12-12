@@ -7,6 +7,16 @@ It provides a simple and flexible API for working with RocketMQ, and is designed
 NOTE: **This project is still under development, and is not ready for production use yet.**
 
 
+## Installation
+ExRocketmq can be installed by adding :ex_rocketmq to your list of dependencies in mix.exs:
+```Elixir
+def deps do
+  [
+    {:ex_rocketmq, "~> 0.1.0"}
+  ]
+end
+```
+
 ## Usage
 
 ### producer

@@ -5,11 +5,12 @@ defmodule ExRocketmq.MixProject do
   @name "lib_oss"
   @repo_url "https://github.com/tt67wq/ex_rocketmq"
   @description "Elixir client for Apache RocketMQ"
+  @version "0.1.0"
 
   def project do
     [
       app: :ex_rocketmq,
-      version: "0.1.0",
+      version: @version,
       elixir: "~> 1.15",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
